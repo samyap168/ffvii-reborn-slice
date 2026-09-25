@@ -4,7 +4,7 @@
 // Procedural behaviour poses + four-legged foot-planting gait with IK.
 import * as THREE from 'three/webgpu';
 import { uniform, vec3 } from 'three/tsl';
-import { meshSdf, type Prim, type MaterialDef, type Vec3 } from './sdf';
+import { meshSdf, type Prim, type MaterialDef, type Vec3, type MeshJob } from './sdf';
 import { buildRig, type BoneSpec, type Rig, mirrorX, add, lerp3 } from './rig';
 import { buildSkinnedGeometry, characterMaterial } from './charmat';
 import { makeEye } from './eyes';
@@ -220,8 +220,7 @@ export class MonsterActor {
 
   constructor(quality: 'low' | 'high' = 'high') {
     this.rig = buildRig(MONSTER_BONES);
-    const body = meshSdf({ prims: bodyPrims(), materials: MATS, bones: NAMES }, quality === 'high' ? 0.015 : 0.02, { weightSigma: 0.06, smooth: 1 });
-    const head = meshSdf({ prims: headPrims(), materials: MATS, bones: NAMES }, quality === 'high' ? 0.0075 : 0.011, { weightSigma: 0.03, smooth: 1 });
+    const [body, head] = monsterMeshJobs(quality).map((j) => meshSdf(j.model, j.cell, j.opts));
     const mat = characterMaterial({ flash: vec3(this.flash as any), emissiveScale: this.glow, dissolve: this.dissolveU });
     const group = new THREE.Group();
     group.add(this.rig.root);
@@ -705,4 +704,11 @@ export class MonsterActor {
       }
     }
   }
+}
+
+export function monsterMeshJobs(quality: 'low' | 'high' = 'high'): MeshJob[] {
+  return [
+    { model: { prims: bodyPrims(), materials: MATS, bones: NAMES }, cell: quality === 'high' ? 0.015 : 0.02, opts: { weightSigma: 0.06, smooth: 1 } },
+    { model: { prims: headPrims(), materials: MATS, bones: NAMES }, cell: quality === 'high' ? 0.0075 : 0.011, opts: { weightSigma: 0.03, smooth: 1 } },
+  ];
 }

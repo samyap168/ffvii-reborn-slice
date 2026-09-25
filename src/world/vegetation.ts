@@ -27,11 +27,15 @@ import {
   instanceIndex,
   hash,
   uint,
+  step,
+  distance,
+  screenCoordinate,
+  interleavedGradientNoise,
 } from 'three/tsl';
 import { RNG, Simplex, smoothstep as ss, clamp } from '../core/math';
 import { U } from '../core/env';
 import type { Heightfield } from './heightfield';
-import { ARENA, RUIN_SITES, LAKE, HALF } from './layout';
+import { ARENA, RUIN_SITES, LAKE, HALF, PLAYER_START, MONSTER_MEADOW } from './layout';
 
 // ---------------------------------------------------------------------------
 // Textures (painted procedurally on canvases)
@@ -392,7 +396,9 @@ function leafMaterial(tex: THREE.Texture, tint: THREE.Color, swayStrength: numbe
   const autumn = smoothstep(0.82, 1.0, variation);
   const tintV = mix(vec3(tint.r, tint.g, tint.b), vec3(1.25, 0.75, 0.3), autumn.mul(0.6)).mul(mix(float(0.8), float(1.15), hash(instanceIndex)));
   m.colorNode = t.rgb.mul(tintV);
-  m.opacityNode = t.a;
+  // Dither foliage away when the camera brushes through it.
+  const nearFade = smoothstep(1.2, 4.0, distance(positionWorld, cameraPosition));
+  m.opacityNode = t.a.mul(step(interleavedGradientNoise(screenCoordinate), nearFade));
   m.roughnessNode = float(0.75);
   const viewDir = normalize(positionWorld.sub(cameraPosition));
   const back = pow(saturate(dot(viewDir, U.sunDir)), 4.0);
@@ -499,6 +505,9 @@ export class Vegetation {
     if (Math.hypot(x - ARENA.x, z - ARENA.z) < ARENA.radius + 12) return false;
     if (Math.hypot(x - hf.bridge.cx, z - hf.bridge.cz) < hf.bridge.half + 6) return false;
     for (const s of RUIN_SITES) if (Math.hypot(x - s.x, z - s.z) < 16) return false;
+    // Clearings where the camera and the fight need room.
+    if (Math.hypot(x - PLAYER_START.x, z - PLAYER_START.z) < 18) return false;
+    if (Math.hypot(x - MONSTER_MEADOW.x, z - MONSTER_MEADOW.z) < 24) return false;
     const N = hf.res;
     const i = clamp(Math.round((x + HALF) / 2), 0, N - 1),
       j = clamp(Math.round((z + HALF) / 2), 0, N - 1);

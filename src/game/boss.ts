@@ -99,7 +99,7 @@ export class ElderZolom implements Target {
     return this.actor.headCenter().add(new THREE.Vector3(0, 0.3, 0));
   }
   hurtSpheres() {
-    const out: { c: THREE.Vector3; r: number }[] = [{ c: this.actor.headCenter(), r: 2.3 }, { c: this.actor.mouth(), r: 1.4 }];
+    const out: { c: THREE.Vector3; r: number }[] = [{ c: this.actor.headCenter(), r: 2.9 }, { c: this.actor.mouth(), r: 1.75 }];
     // Neck segments within reach of the plaza.
     for (let i = 2; i < 18; i += 2) out.push({ c: this.actor.segPos[i].clone(), r: 1.9 });
     return out;
@@ -232,7 +232,7 @@ export class ElderZolom implements Target {
     const side = new THREE.Vector3(toA.z, 0, -toA.x);
     // Default hover pose: head raised over the water edge, weaving.
     const weave = Math.sin(this.t * 0.7) * 3 + Math.sin(this.t * 1.7) * 1;
-    const hover = this.anchor.clone().addScaledVector(toA, 28).addScaledVector(side, weave).setY(LAKE.level + 15 + Math.sin(this.t * 1.1) * 1.5);
+    const hover = this.anchor.clone().addScaledVector(toA, 34).addScaledVector(side, weave).setY(LAKE.level + 16 + Math.sin(this.t * 1.1) * 1.5);
     let jaw = 0.1 + Math.max(0, Math.sin(this.t * 0.8)) * 0.1;
     let headLerp = 2.5;
 
@@ -441,7 +441,7 @@ export class ElderZolom implements Target {
     // Vein colour/glow by phase.
     const enr = this.enraged || this.phase === 'enraging' ? 1 : 0;
     a.veinColor.value.lerp(enr ? new THREE.Color(1.0, 0.18, 0.05) : new THREE.Color(0.2, 0.9, 1.0), 1 - Math.exp(-dt * 1.5));
-    if (this.phase !== 'dead') a.veinGlow.value = damp(a.veinGlow.value, enr ? 1.6 : 0.45, 2, dt);
+    if (this.phase !== 'dead') a.veinGlow.value = damp(a.veinGlow.value, enr ? 1.6 : 0.8, 2, dt);
     a.update(dt);
   }
 

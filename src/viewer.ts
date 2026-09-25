@@ -234,6 +234,7 @@ export async function runViewer(renderer: THREE.WebGPURenderer, what: string, pa
     key.shadow.camera.right = key.shadow.camera.top = 8;
   }
 
+  if (params.has('ty')) target.y = parseFloat(params.get('ty')!);
   const yaw = parseFloat(params.get('yaw') || '0.5');
   const pitch = parseFloat(params.get('pitch') || '0.08');
   const place = () => {

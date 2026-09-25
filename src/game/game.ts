@@ -19,6 +19,11 @@ import { Ruinfang } from './enemies';
 import { PType } from '../vfx/particles';
 import { ElderZolom } from './boss';
 import { KnightsOfRound } from '../cinematics/kor';
+import { prefetchMeshes } from '../characters/sdfPool';
+import { cloudMeshJobs } from '../characters/cloud';
+import { chocoboMeshJobs } from '../characters/chocobo';
+import { monsterMeshJobs } from '../characters/monster';
+import { serpentMeshJobs } from '../characters/serpent';
 import { PRESET_DAY, PRESET_STORM, lerpPreset } from '../core/env';
 import { damp, clamp, wrapAngle, smoothstep, lerp } from '../core/math';
 
@@ -73,13 +78,24 @@ export class Game {
   }
 
   async load() {
-    const prog = (p: number, l: string) => this.ui.setLoading(p, l);
+    const t0 = performance.now();
+    let tl = t0;
+    const prog = (p: number, l: string) => {
+      const now = performance.now();
+      console.log(`[load] ${(now - tl).toFixed(0)}ms -> ${l}`);
+      tl = now;
+      this.ui.setLoading(p, l);
+    };
+    // Characters mesh in parallel workers while the world generates here.
+    const cq0 = this.q.level === 'low' ? 'low' : 'high';
+    const [heroMeshes, monsterMeshes, bossMeshes] = prefetchMeshes([[...cloudMeshJobs(cq0), ...chocoboMeshJobs(cq0)], monsterMeshJobs(cq0), serpentMeshJobs(cq0)]);
     this.world = new World(this.scene, this.q);
     await this.world.build(this.renderer, this.camera, prog);
     for (const c of this.world.veg.colliders) this.grid.add(c);
     for (const c of this.world.ruins.colliders) this.grid.add(c);
     prog(0.55, 'Summoning Cloud & the Golden Chocobo');
     await tick();
+    await heroMeshes;
     const cq = this.q.level === 'low' ? 'low' : 'high';
     this.player = new Player(this.world.hf, this.grid, cq);
     this.scene.add(this.player.choco.root);
@@ -102,9 +118,11 @@ export class Game {
     this.combat.onLimitReady = () => this.ui.showHint('LIMIT BREAK ready — press <kbd>R</kbd>', 4);
     prog(0.86, 'A shadow stirs in the meadow');
     await tick();
+    await monsterMeshes;
     this.spawnMonster();
     prog(0.9, 'Something ancient sleeps beneath the lake');
     await tick();
+    await bossMeshes;
     this.spawnBoss();
     this.hookPlayerEvents();
     // Warm up shaders so the first frames don't hitch.
@@ -116,6 +134,7 @@ export class Game {
       /* ignore */
     }
     prog(1, 'Ready');
+    console.log(`[load] total ${(performance.now() - t0).toFixed(0)}ms`);
   }
 
   private breathLoop: any = null;

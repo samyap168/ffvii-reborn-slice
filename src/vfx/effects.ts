@@ -354,14 +354,27 @@ export class Effects {
 
   /** Beam between two points (boss breath). Returns handle to update endpoints. */
   beam(color: THREE.Color, radius: number) {
-    const m = additiveMat();
     const c = uniform(color.clone());
     const inten = uniform(1);
+    const len = uniform(10);
     const v = uv();
-    const n = mx_fractal_noise_float(vec3(v.x.mul(10.0), v.y.mul(6.0).sub(U.time.mul(12.0)), 0), 4, 2.0, 0.5).mul(0.5).add(0.5);
-    m.colorNode = vec4((vec3(c as any) as any).mul(n.mul(1.2).add(0.4)).mul(inten).mul(4.0), 1);
-    const mesh = new THREE.Mesh(cylGeo, m);
+    // Camera-facing falloff: bright along the axis, soft at the silhouette.
+    const facing = abs(dot(normalWorld, normalize(cameraPosition.sub(positionWorld))));
+    // Noise density independent of beam length; flows from source to target.
+    const along = v.y.mul(len).mul(0.12);
+    const n = mx_fractal_noise_float(vec3(v.x.mul(6.0), along.sub(U.time.mul(9.0)), 0), 4, 2.0, 0.5).mul(0.5).add(0.5);
+    const ends = smoothstep(0.0, 0.015, v.y).mul(sstep(1.0, 0.985, v.y));
+    const coreM = additiveMat();
+    const core = pow(facing, 1.6);
+    coreM.colorNode = vec4(vec3(c as any).mul(core.mul(n.mul(1.1).add(0.55))).add(vec3(1, 1, 1).mul(pow(facing, 6.0).mul(0.6))).mul(inten).mul(ends).mul(4.0), 1);
+    const mesh = new THREE.Mesh(cylGeo, coreM);
     mesh.frustumCulled = false;
+    const haloM = additiveMat();
+    haloM.colorNode = vec4(vec3(c as any).mul(pow(facing, 3.0).mul(n.mul(0.4).add(0.6)).mul(0.2)).mul(inten).mul(ends).mul(4.0), 1);
+    const halo = new THREE.Mesh(cylGeo, haloM);
+    halo.frustumCulled = false;
+    halo.scale.set(2.0, 1, 2.0);
+    mesh.add(halo);
     this.group.add(mesh);
     const up = new THREE.Vector3(0, 1, 0);
     return {
@@ -369,13 +382,16 @@ export class Effects {
       inten,
       set(a: THREE.Vector3, b: THREE.Vector3, r = radius) {
         const d = b.clone().sub(a);
+        const l = d.length();
         mesh.position.copy(a);
-        mesh.quaternion.setFromUnitVectors(up, d.clone().normalize());
-        mesh.scale.set(r, d.length(), r);
+        if (l > 1e-6) mesh.quaternion.setFromUnitVectors(up, d.multiplyScalar(1 / l));
+        mesh.scale.set(r, Math.max(l, 1e-4), r);
+        len.value = l / Math.max(r, 0.05);
       },
       dispose: () => {
         mesh.parent?.remove(mesh);
-        m.dispose();
+        coreM.dispose();
+        haloM.dispose();
       },
     };
   }

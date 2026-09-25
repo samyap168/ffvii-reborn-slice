@@ -26,7 +26,7 @@ import {
   mx_noise_float,
   mx_fractal_noise_float,
 } from 'three/tsl';
-import { meshSdf, type Prim, type MaterialDef, type Vec3 } from './sdf';
+import { meshSdf, type Prim, type MaterialDef, type Vec3, type MeshJob } from './sdf';
 import { buildRig, type BoneSpec, type Rig } from './rig';
 import { buildSkinnedGeometry, characterMaterial } from './charmat';
 import { makeEye } from './eyes';
@@ -44,7 +44,7 @@ const lin = (r: number, g: number, b: number): Vec3 => [Math.pow(r, 2.2), Math.p
 export function serpentRadius(u: number) {
   const neck = 1.45 + 0.55 * smoothstepJS(0, 0.1, u);
   const taper = 1 - smoothstepJS(0.35, 1.0, u) * 0.86;
-  return neck * taper * 1.6;
+  return neck * taper * 2.0;
 }
 function smoothstepJS(a: number, b: number, v: number) {
   const t = Math.max(0, Math.min(1, (v - a) / (b - a)));
@@ -110,12 +110,16 @@ function bodyMaterial(veinColor: any, veinGlow: any, flash: any, dissolve: any) 
   const around = v.y;
   const top = abs(around.sub(0.5)).mul(2.0); // 1 at top (a=0/1), 0 at belly (0.5)
   const belly = sstep(0.35, 0.12, top);
-  // Scales: offset rows of rounded cells.
+  // Scales: overlapping shingles in offset rows. t runs 0 (tucked under the
+  // previous scale) -> 1 (raised free edge); the edge curves back like a shield.
   const sx = u.mul(1.6);
-  const sy = around.mul(44.0).add(fract(sx.floor().mul(0.5)).mul(1.0));
-  const cell = vec2(fract(sx), fract(sy)).sub(0.5);
-  const sd = cell.length();
-  const scaleEdge = smoothstep(0.32, 0.5, sd);
+  const sy = around.mul(44.0).add(fract(sx.floor().mul(0.5)));
+  const qy = fract(sy).sub(0.5);
+  const t = fract(sx.add(qy.mul(qy).mul(1.8)));
+  const crease = sstep(0.3, 0.0, t); // shadow under the overlapping edge
+  const seam = smoothstep(0.4, 0.5, abs(qy)).mul(smoothstep(0.1, 0.5, t));
+  const keel = sstep(0.06, 0.0, abs(qy)).mul(smoothstep(0.3, 0.8, t)).mul(0.35);
+  const scaleEdge = saturate(crease.add(seam.mul(0.7)));
   const n = mx_fractal_noise_float(vec3(u.mul(0.3), around.mul(6.0), 0), 3, 2.0, 0.5).mul(0.5).add(0.5);
   const dark = vec3(0.005, 0.016, 0.014);
   const mid = vec3(0.014, 0.05, 0.04);
@@ -123,7 +127,7 @@ function bodyMaterial(veinColor: any, veinGlow: any, flash: any, dissolve: any) 
   // Banding pattern down the back.
   const band = smoothstep(0.55, 0.9, sin(u.mul(0.9).add(n.mul(2.0))).mul(0.5).add(0.5)).mul(smoothstep(0.6, 0.95, top));
   col = mix(col, vec3(0.04, 0.035, 0.015), band.mul(0.7));
-  col = col.mul(mix(float(1.0), float(0.55), scaleEdge));
+  col = col.mul(mix(float(1.0), float(0.45), scaleEdge)).mul(float(0.85).add(t.mul(0.3)).add(keel));
   // Belly plates.
   const plate = smoothstep(0.85, 0.98, fract(u.mul(0.9)));
   const bellyCol = mix(vec3(0.16, 0.13, 0.08), vec3(0.05, 0.04, 0.025), plate);
@@ -133,15 +137,15 @@ function bodyMaterial(veinColor: any, veinGlow: any, flash: any, dissolve: any) 
   m.metalnessNode = float(0.02);
 
   // Wet sheen near water line + normal bump per scale.
-  const bump = cell.mul(float(1).sub(scaleEdge)).mul(0.9);
+  const bump = vec2(t.sub(0.55).mul(1.2), qy.mul(0.9)).mul(float(1).sub(crease.mul(0.7)));
   const nn = normalize(normalWorld.add(vec3(bump.x, bump.y, bump.x.negate()).mul(0.25)));
   m.normalNode = normalize(cameraViewMatrix.mul(vec4(nn, 0)).xyz);
   // Veins: glowing cracks between scales (enrage makes them blaze).
-  const vein = smoothstep(0.44, 0.49, sd).mul(smoothstep(0.62, 0.85, mx_noise_float(vec3(u.mul(0.25), around.mul(3.0), U.time.mul(0.2))).mul(0.5).add(0.5)));
+  const vein = sstep(0.07, 0.0, t).mul(float(1).sub(seam)).mul(smoothstep(0.62, 0.85, mx_noise_float(vec3(u.mul(0.25), around.mul(3.0), U.time.mul(0.2))).mul(0.5).add(0.5)));
   const pulse = sin(u.mul(0.6).sub(U.time.mul(3.0))).mul(0.3).add(0.7);
   const V = normalize(cameraPosition.sub(positionWorld));
   const rim = pow(float(1).sub(saturate(dot(normalWorld, V))), 3.0);
-  m.emissiveNode = (vec3(veinColor as any) as any).mul(vein.mul(pulse).mul(veinGlow).mul(2.0)).add(vec3(0.02, 0.06, 0.05).mul(rim).mul(U.sunIntensity.mul(0.3))).add(vec3(flash as any));
+  m.emissiveNode = (vec3(veinColor as any) as any).mul(vein.mul(pulse).mul(veinGlow).mul(2.0)).add(vec3(0.1, 0.3, 0.26).mul(rim).mul(U.sunIntensity.mul(0.35))).add(vec3(flash as any));
   // Dissolve for the finale.
   const dn = mx_noise_float(positionWorld.mul(0.35)).mul(0.5).add(0.5);
   m.alphaTestNode = float(0.5);
@@ -153,8 +157,8 @@ function bodyMaterial(veinColor: any, veinGlow: any, flash: any, dissolve: any) 
 // Head sculpt (SDF), local frame: faces +Z, origin at neck joint.
 // ---------------------------------------------------------------------------
 const HEAD_MATS: Record<string, MaterialDef> = {
-  scale: { color: lin(0.12, 0.26, 0.22), rough: 0.35, metal: 0.15, kind: 6 },
-  scaleDark: { color: lin(0.06, 0.12, 0.11), rough: 0.4, metal: 0.1, kind: 6 },
+  scale: { color: lin(0.12, 0.26, 0.22), rough: 0.58, metal: 0.05, kind: 6 },
+  scaleDark: { color: lin(0.06, 0.12, 0.11), rough: 0.62, metal: 0.05, kind: 6 },
   belly: { color: lin(0.45, 0.4, 0.3), rough: 0.55, metal: 0, kind: 8 },
   horn: { color: lin(0.34, 0.3, 0.25), rough: 0.45, metal: 0, kind: 8 },
   hornDark: { color: lin(0.2, 0.17, 0.14), rough: 0.4, metal: 0, kind: 8 },
@@ -255,7 +259,7 @@ export class SerpentActor {
 
     // Head.
     this.headRig = buildRig(HEAD_BONES);
-    const data = meshSdf({ prims: headPrims(), materials: HEAD_MATS, bones: HEAD_BONES.map((b) => b.name) }, quality === 'high' ? 0.045 : 0.065, { weightSigma: 0.25, smooth: 1 });
+    const [data] = serpentMeshJobs(quality).map((j) => meshSdf(j.model, j.cell, j.opts));
     const hm = new THREE.SkinnedMesh(buildSkinnedGeometry(data), characterMaterial({ flash: vec3(this.flash as any) }));
     hm.bind(this.headRig.skeleton, new THREE.Matrix4());
     hm.frustumCulled = false;
@@ -274,7 +278,7 @@ export class SerpentActor {
         this.eyes.push(e);
       }
     }
-    this.headGroup.scale.setScalar(1.4);
+    this.headGroup.scale.setScalar(1.75);
     this.root.add(this.headGroup);
     this.curvePts = [0, 1, 2, 3, 4, 5, 6].map(() => new THREE.Vector3());
     this.curve = new THREE.CatmullRomCurve3(this.curvePts, false, 'centripetal');
@@ -339,3 +343,7 @@ export class SerpentActor {
 export { SEGS as SERPENT_SEGS };
 void attribute;
 void float;
+
+export function serpentMeshJobs(quality: 'low' | 'high' = 'high'): MeshJob[] {
+  return [{ model: { prims: headPrims(), materials: HEAD_MATS, bones: HEAD_BONES.map((b) => b.name) }, cell: quality === 'high' ? 0.045 : 0.065, opts: { weightSigma: 0.25, smooth: 1 } }];
+}

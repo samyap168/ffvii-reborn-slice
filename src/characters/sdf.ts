@@ -390,7 +390,32 @@ export class SdfEvaluator {
 }
 
 /** Surface Nets meshing of the model; returns skinnable mesh data. */
-export function meshSdf(model: SdfModel, cell: number, opts: { weightSigma?: number; smooth?: number; region?: { min: Vec3; max: Vec3 } } = {}): MeshData {
+export type MeshOpts = { weightSigma?: number; smooth?: number; region?: { min: Vec3; max: Vec3 } };
+export interface MeshJob {
+  model: SdfModel;
+  cell: number;
+  opts?: MeshOpts;
+}
+
+// Meshes pre-built off the main thread (see sdfPool.ts), keyed by their inputs.
+const meshCache = new Map<string, MeshData>();
+export const meshJobKey = (j: MeshJob) => JSON.stringify([j.cell, j.opts ?? {}, j.model]);
+export function primeMesh(key: string, data: MeshData) {
+  meshCache.set(key, data);
+}
+
+/** Mesh an SDF model, using a pre-built result when one matches exactly. */
+export function meshSdf(model: SdfModel, cell: number, opts: MeshOpts = {}): MeshData {
+  const key = meshJobKey({ model, cell, opts });
+  const hit = meshCache.get(key);
+  if (hit) {
+    meshCache.delete(key);
+    return hit;
+  }
+  return meshSdfRaw(model, cell, opts);
+}
+
+export function meshSdfRaw(model: SdfModel, cell: number, opts: MeshOpts = {}): MeshData {
   const ev = new SdfEvaluator(model);
   const b = opts.region ?? ev.bounds();
   const pad = cell * 2;

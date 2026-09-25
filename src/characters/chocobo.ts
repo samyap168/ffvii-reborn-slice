@@ -2,7 +2,7 @@
 // foot-planting gait (world-locked stance feet, arcing swings, head stabilisation).
 import * as THREE from 'three/webgpu';
 import { uniform, vec3 } from 'three/tsl';
-import { meshSdf, type Prim, type MaterialDef, type Vec3 } from './sdf';
+import { meshSdf, type Prim, type MaterialDef, type Vec3, type MeshJob } from './sdf';
 import { buildRig, type BoneSpec, type Rig, mirrorX, add, lerp3 } from './rig';
 import { buildSkinnedGeometry, characterMaterial } from './charmat';
 import { makeEye } from './eyes';
@@ -158,8 +158,7 @@ export class ChocoboActor {
 
   constructor(quality: 'low' | 'high' = 'high') {
     this.rig = buildRig(CHOCO_BONES);
-    const body = meshSdf({ prims: bodyPrims(), materials: MATS, bones: NAMES }, quality === 'high' ? 0.0125 : 0.018, { weightSigma: 0.06, smooth: 1 });
-    const head = meshSdf({ prims: headPrims(), materials: MATS, bones: NAMES }, quality === 'high' ? 0.0065 : 0.009, { weightSigma: 0.035, smooth: 1 });
+    const [body, head] = chocoboMeshJobs(quality).map((j) => meshSdf(j.model, j.cell, j.opts));
     const mat = characterMaterial({ flash: vec3(this.flash as any) });
     const group = new THREE.Group();
     group.add(this.rig.root);
@@ -336,4 +335,11 @@ export class ChocoboActor {
   }
 
   springsUpdate() {}
+}
+
+export function chocoboMeshJobs(quality: 'low' | 'high' = 'high'): MeshJob[] {
+  return [
+    { model: { prims: bodyPrims(), materials: MATS, bones: NAMES }, cell: quality === 'high' ? 0.0125 : 0.018, opts: { weightSigma: 0.06, smooth: 1 } },
+    { model: { prims: headPrims(), materials: MATS, bones: NAMES }, cell: quality === 'high' ? 0.0065 : 0.009, opts: { weightSigma: 0.035, smooth: 1 } },
+  ];
 }

@@ -2,7 +2,7 @@
 // (sleeveless knit turtleneck, baggy trousers, belts, heavy boots, gloves,
 // silver pauldron), materia bracer, iconic spiky hair and mako-glowing eyes.
 import * as THREE from 'three/webgpu';
-import { meshSdf, type Prim, type SdfModel, type Vec3, type MaterialDef } from './sdf';
+import { meshSdf, type Prim, type SdfModel, type Vec3, type MaterialDef, type MeshJob } from './sdf';
 import { buildRig, type BoneSpec, type Rig, mirrorX, add, scale, lerp3, norm3, sub } from './rig';
 import { buildSkinnedGeometry, characterMaterial } from './charmat';
 import { makeBusterSword } from './sword';
@@ -22,7 +22,7 @@ export const CLOUD_MATS: Record<string, MaterialDef> = {
   metal: { color: lin(0.78, 0.8, 0.83), rough: 0.26, metal: 1, kind: 3 },
   metalDark: { color: lin(0.36, 0.37, 0.4), rough: 0.35, metal: 1, kind: 3 },
   hair: { color: lin(0.9, 0.68, 0.3), rough: 0.55, metal: 0, kind: 4 },
-  brow: { color: lin(0.62, 0.46, 0.25), rough: 0.6, metal: 0, kind: 4 },
+  brow: { color: lin(0.5, 0.36, 0.18), rough: 0.7, metal: 0, kind: 0 },
   lip: { color: lin(0.8, 0.58, 0.52), rough: 0.4, metal: 0, kind: 0 },
   materiaG: { color: lin(0.25, 1.0, 0.45), rough: 0.1, metal: 0, kind: 7, emissive: 1.4 },
   materiaR: { color: lin(1.0, 0.25, 0.2), rough: 0.1, metal: 0, kind: 7, emissive: 1.2 },
@@ -174,9 +174,9 @@ export function headPrims(): Prim[] {
   P.push({ type: 'capsule', a: [0, 1.48, -0.01], b: [0, 1.61, 0.0], ra: 0.047, rb: 0.045, mat: 'skin', bone: 'neck', bone2: 'head', k: 0.02 });
   // Cranium + face.
   P.push({ type: 'ellipsoid', c: [0, 1.685, -0.006], r: [0.08, 0.096, 0.098], mat: 'skin', bone: 'head', k: 0.02 });
-  P.push({ type: 'ellipsoid', c: [0, 1.633, 0.028], r: [0.066, 0.068, 0.072], mat: 'skin', bone: 'head', k: 0.035 });
-  P.push({ type: 'ellipsoid', c: [0, 1.588, 0.048], r: [0.026, 0.022, 0.028], mat: 'skin', bone: 'head', k: 0.028 }); // chin
-  P.push({ type: 'capsule', a: [-0.046, 1.607, 0.012], b: [0.046, 1.607, 0.012], ra: 0.024, rb: 0.024, mat: 'skin', bone: 'head', k: 0.03 }); // jaw width
+  P.push({ type: 'ellipsoid', c: [0, 1.633, 0.028], r: [0.062, 0.068, 0.072], mat: 'skin', bone: 'head', k: 0.035 });
+  P.push({ type: 'ellipsoid', c: [0, 1.587, 0.05], r: [0.024, 0.021, 0.027], mat: 'skin', bone: 'head', k: 0.028 }); // chin
+  P.push({ type: 'capsule', a: [-0.04, 1.608, 0.012], b: [0.04, 1.608, 0.012], ra: 0.022, rb: 0.022, mat: 'skin', bone: 'head', k: 0.03 }); // jaw width
   for (const sx of [1, -1]) {
     P.push({ type: 'ellipsoid', c: [0.046 * sx, 1.643, 0.066], r: [0.026, 0.017, 0.019], mat: 'skin', bone: 'head', k: 0.02 }); // cheekbones
     P.push({ type: 'ellipsoid', c: [0.081 * sx, 1.656, -0.004], r: [0.011, 0.027, 0.019], rot: [0, 0.35 * sx, 0], mat: 'skin', bone: 'head', k: 0.008 }); // ears
@@ -187,13 +187,17 @@ export function headPrims(): Prim[] {
   P.push({ type: 'sphere', c: [0, 1.629, 0.099], r: 0.0095, mat: 'skin', bone: 'head', k: 0.008 });
   for (const sx of [1, -1]) P.push({ type: 'sphere', c: [0.008 * sx, 1.626, 0.094], r: 0.0065, mat: 'skin', bone: 'head', k: 0.006 });
   // Eye sockets.
-  for (const sx of [1, -1]) P.push({ type: 'ellipsoid', op: 'sub', c: [0.031 * sx, 1.663, 0.093], r: [0.018, 0.0105, 0.011], mat: 'skin', bone: 'head', k: 0.006 });
+  for (const sx of [1, -1]) {
+    P.push({ type: 'ellipsoid', op: 'sub', c: [0.031 * sx, 1.663, 0.093], r: [0.0192, 0.0097, 0.011], rot: [0, 0, 0.1 * sx], mat: 'skin', bone: 'head', k: 0.006 });
+    // Heavy upper lid over the top of the iris: the steady SOLDIER stare.
+    P.push({ type: 'capsule', a: [0.017 * sx, 1.6712, 0.0875], b: [0.045 * sx, 1.6738, 0.0832], ra: 0.0038, rb: 0.003, mat: 'skin', bone: 'head', k: 0.003 });
+  }
   // Mouth + lips.
   P.push({ type: 'capsule', op: 'sub', a: [-0.012, 1.601, 0.091], b: [0.012, 1.601, 0.091], ra: 0.0024, rb: 0.0028, mat: 'skin', bone: 'head', k: 0.004 });
-  P.push({ type: 'ellipsoid', c: [0, 1.596, 0.086], r: [0.011, 0.0045, 0.007], mat: 'lip', bone: 'head', k: 0.006 });
-  P.push({ type: 'ellipsoid', c: [0, 1.605, 0.087], r: [0.012, 0.0032, 0.006], mat: 'lip', bone: 'head', k: 0.005 });
-  // Eyebrows (painted + slight relief).
-  for (const sx of [1, -1]) P.push({ type: 'capsule', op: 'paint', a: [0.012 * sx, 1.68, 0.095], b: [0.05 * sx, 1.686, 0.08], ra: 0.006, rb: 0.004, mat: 'brow', bone: 'head' });
+  P.push({ type: 'ellipsoid', c: [0, 1.596, 0.086], r: [0.0105, 0.0036, 0.0052], mat: 'lip', bone: 'head', k: 0.006 });
+  P.push({ type: 'ellipsoid', c: [0, 1.605, 0.087], r: [0.0115, 0.0026, 0.0045], mat: 'lip', bone: 'head', k: 0.005 });
+  // Eyebrows: raised, angled low over the eyes.
+  for (const sx of [1, -1]) P.push({ type: 'capsule', a: [0.011 * sx, 1.6785, 0.0955], b: [0.052 * sx, 1.6865, 0.0815], ra: 0.0062, rb: 0.0044, mat: 'brow', bone: 'head', k: 0.003 });
 
   // Hair cap.
   P.push({ type: 'ellipsoid', c: [0, 1.716, -0.022], r: [0.089, 0.083, 0.098], mat: 'hair', bone: 'head', k: 0.01 });
@@ -242,12 +246,18 @@ export interface CloudModel {
   eyes: THREE.Mesh[];
 }
 
-export function buildCloud(quality: 'low' | 'high' = 'high'): CloudModel {
-  const rig = buildRig(CLOUD_BONES);
+export function cloudMeshJobs(quality: 'low' | 'high' = 'high'): MeshJob[] {
   const bodyModel: SdfModel = { prims: bodyPrims(), materials: CLOUD_MATS, bones: BONE_NAMES };
   const headModel: SdfModel = { prims: headPrims(), materials: CLOUD_MATS, bones: BONE_NAMES };
-  const bodyData = meshSdf(bodyModel, quality === 'high' ? 0.0095 : 0.014, { weightSigma: 0.03, smooth: 1 });
-  const headData = meshSdf(headModel, quality === 'high' ? 0.0042 : 0.006, { weightSigma: 0.02, smooth: 1 });
+  return [
+    { model: bodyModel, cell: quality === 'high' ? 0.0095 : 0.014, opts: { weightSigma: 0.03, smooth: 1 } },
+    { model: headModel, cell: quality === 'high' ? 0.0042 : 0.006, opts: { weightSigma: 0.02, smooth: 1 } },
+  ];
+}
+
+export function buildCloud(quality: 'low' | 'high' = 'high'): CloudModel {
+  const rig = buildRig(CLOUD_BONES);
+  const [bodyData, headData] = cloudMeshJobs(quality).map((j) => meshSdf(j.model, j.cell, j.opts));
   const flash = uniform(new THREE.Color(0, 0, 0));
   const mat = characterMaterial({ flash: vec3(flash as any) });
   const body = new THREE.SkinnedMesh(buildSkinnedGeometry(bodyData), mat);
@@ -265,7 +275,7 @@ export function buildCloud(quality: 'low' | 'high' = 'high'): CloudModel {
   // Eyes attached to the head bone.
   const eyes: THREE.Mesh[] = [];
   for (const p of [EYE_L, EYE_R]) {
-    const eye = makeEye(0.012, new THREE.Color(0.35, 0.8, 1.0), { irisSize: 0.72, pupil: 0.26 });
+    const eye = makeEye(0.0132, new THREE.Color(0.35, 0.8, 1.0), { irisSize: 0.92, pupil: 0.3 });
     const hw = rig.bindWorld['head'];
     eye.position.set(p[0] - hw.x, p[1] - hw.y, p[2] - hw.z);
     rig.bones['head'].add(eye);
