@@ -100,9 +100,9 @@ export const skyColorFn = Fn(([dirIn]: [any]) => {
   nebula = nebula.add(vec3(1.0, 0.95, 0.85).mul(star));
   // Golden radial halo around the zenith portal.
   const zen = saturate(y);
-  const halo = pow(zen, 6.0).mul(1.5);
+  const halo = pow(zen, 6.0).mul(0.4);
   const rings = sstep(0.02, 0.0, abs(fract(zen.mul(18.0).sub(U.time.mul(0.3))).sub(0.5)).sub(0.46)).mul(pow(zen, 3.0));
-  nebula = nebula.add(vec3(1.0, 0.7, 0.3).mul(halo.add(rings.mul(0.6))));
+  nebula = nebula.add(vec3(1.0, 0.7, 0.3).mul(halo.add(rings.mul(0.3))));
   sky = mix(sky, nebula, cos);
 
   return sky;

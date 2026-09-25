@@ -28,7 +28,7 @@ for (const st of JSON.parse(stepsJson)) {
   else if (op === 'wait') await page.waitForTimeout(a);
   else if (op === 'shot') {
     const f0 = await page.evaluate(() => window.__frames);
-    await page.waitForFunction((f) => window.__frames >= f + 2, f0, { timeout: 120000, polling: 200 });
+    await page.waitForFunction((f) => window.__frames >= f + 2, f0, { timeout: 600000, polling: 200 });
     await page.screenshot({ path: 'tools/out/' + a, timeout: 180000 });
     console.log('shot', a, ((Date.now() - t0) / 1000).toFixed(1) + 's');
   }

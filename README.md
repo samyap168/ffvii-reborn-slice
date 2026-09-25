@@ -27,6 +27,33 @@ Requires a modern desktop browser. WebGPU is used when available (Chrome/Edge),
 otherwise it falls back to WebGL2 automatically. Add `?gl` to force WebGL2 and
 `?q=low|medium|high|ultra` to pick a quality preset.
 
+## Play
+
+**▶ https://samyap168.github.io/ffvii-reborn-slice/** (a 5–10 minute demo)
+
+| Action | Keys |
+| --- | --- |
+| Move / ride | `W` `A` `S` `D` |
+| Gallop / sprint | `Shift` |
+| Jump (riding) / Dodge (on foot) | `Space` |
+| Camera | Mouse (click to capture the pointer) |
+| Call / mount / dismount the chocobo | `F` |
+| Light attack · combo | Left mouse |
+| Heavy attack (hold to charge) | Right mouse |
+| Toggle lock-on | `Q` |
+| Materia: Fire · Thunder · Blizzard · Cure | `1` `2` `3` `4` |
+| Limit Break (when the gauge is full) | `R` |
+| Skip a cinematic | `Esc` / `Enter` |
+
+The flow: title flyover, then the establishing ride, the open meadow, a Ruinfang
+that notices you, dismount into combat, then ride on to the lakeside ruins where
+the **Elder Zolom** rises. Break it into Phase II, fill your Limit and summon the
+**Knights of Round**.
+
+Debug URL parameters: `?q=low|medium|high|ultra`, `?pr=0.75` (pixel-ratio
+scale), `?gl` (force WebGL2), `?skip=explore|boss|enrage|kor` (jump ahead),
+`?view=cloud|choco|monster|serpent|knights` (model viewer).
+
 ## Tech
 
 - three.js r186 `WebGPURenderer` + TSL node materials (WebGL2 fallback)
@@ -35,3 +62,10 @@ otherwise it falls back to WebGL2 automatically. Add `?gl` to force WebGL2 and
 - Cascaded shadow maps, height fog / aerial perspective, procedural sky with clouds
 - Post: motion blur, sun shafts, depth of field, bloom, grading, chromatic aberration, FXAA
 - Web Audio: fully synthesized SFX, spatial audio and a dynamic, state-driven score
+- Characters sculpted from SDF primitives, meshed with Surface Nets and auto-skinned;
+  procedural animation with pose blending, two-bone IK, spring bones and foot planting
+- Cinematic director with blended camera shots, per-shot DOF, letterboxing and events
+- A ~86 s Limit Break + Knights of Round summon: sky-to-cosmos transition, thirteen
+  rising monoliths, rune circles, a dimensional portal, 13 distinct knights
+  (4 hero attacks, 8 quick bursts, the King's converging final strike), silence,
+  whiteout and a golden aftermath

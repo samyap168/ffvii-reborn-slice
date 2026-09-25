@@ -85,7 +85,7 @@ export const PRESET_COSMIC: SkyPreset = {
   sunElev: 0.9,
   sunAzim: 2.35,
   sunColor: [1.0, 0.82, 0.55],
-  sunIntensity: 2.4,
+  sunIntensity: 1.7,
   zenith: [0.02, 0.01, 0.05],
   horizon: [0.35, 0.18, 0.08],
   fog: [0.2, 0.12, 0.08],

@@ -18,6 +18,7 @@ import { PlayerCombat, MATERIA, type Target } from './combat';
 import { Ruinfang } from './enemies';
 import { PType } from '../vfx/particles';
 import { ElderZolom } from './boss';
+import { KnightsOfRound } from '../cinematics/kor';
 import { PRESET_DAY, PRESET_STORM, lerpPreset } from '../core/env';
 import { damp, clamp, wrapAngle, smoothstep, lerp } from '../core/math';
 
@@ -97,6 +98,7 @@ export class Game {
     this.hud = new HUD(this.ui.hudRoot, this.camera, MATERIA);
     this.combat = new PlayerCombat(this.player, this.vfx, this.hud, this.cam, { play: (n, o) => this.sfx(n, o) });
     this.combat.onPlayerDown = () => this.phoenixDown();
+    this.combat.onLimit = () => this.startLimitBreak();
     this.combat.onLimitReady = () => this.ui.showHint('LIMIT BREAK ready — press <kbd>R</kbd>', 4);
     prog(0.86, 'A shadow stirs in the meadow');
     await tick();
@@ -463,7 +465,7 @@ export class Game {
 
     this.world.update(dt, this.time, this.camera);
     this.vfx.update(dt, real);
-    this.updateSunShafts();
+    if (this.state !== 'kor') this.updateSunShafts();
     this.audioFrame(dt);
     this.ui.update(dt);
     input.endFrame();
@@ -619,7 +621,20 @@ export class Game {
         this.sfx('boss_quake', {});
       }
     }
+    if (this.state === 'aftermath') {
+      if (this.stateT > 6.5 && this.stateT - real <= 6.5) {
+        this.cloudSheathe();
+        this.audio?.music.setState('explore', { fade: 6 });
+        this.ui.showHint('The skies are calm again. <kbd>F</kbd> call your chocobo · the world is yours to roam', 8);
+      }
+    }
     void dt;
+  }
+
+  private cloudSheathe() {
+    const c = this.player.cloud;
+    if (c.swordAt === 'hand') c.play('sheathe', { onEvent: (e) => e === 'release' && (c.attachSword('back'), (c.armed = false)) });
+    c.setBase('idle');
   }
 
   // ---------------------------------------------------------------------------
@@ -763,12 +778,78 @@ export class Game {
     this.sfx('thunder_strike', { position: to });
   }
 
+  // ---------------------------------------------------------------------------
+  // Limit Break -> Knights of Round -> aftermath
+  // ---------------------------------------------------------------------------
+  private kor: KnightsOfRound | null = null;
+  private startLimitBreak() {
+    if (this.state !== 'boss' || this.director.active) return;
+    const ph = this.boss.phase;
+    if (ph !== 'p2' && ph !== 'finale' && ph !== 'p1') return;
+    this.combat.limit = 0;
+    this.combat.lockOn = false;
+    this.player.locked = true;
+    this.hud.setVisible(false);
+    this.ui.hideHint();
+    this.sfx('boss_breath_stop');
+    this.beam.mesh.visible = false;
+    this.setState('kor');
+    const game = this;
+    this.kor = new KnightsOfRound({
+      scene: this.scene,
+      vfx: this.vfx,
+      post: this.post,
+      boss: this.boss,
+      player: this.player,
+      world: this.world,
+      ui: this.ui,
+      audio: this.audio,
+      camera: this.camera,
+      setTimeScale: (s) => (this.timeScale = s),
+      sfx: (n, o) => this.sfx(n, o),
+      storm: {
+        get value() {
+          return game.storm;
+        },
+        set(v: number) {
+          game.storm = v;
+          game.stormTarget = v;
+        },
+      },
+      onFinished: () => this.onKorFinished(),
+    });
+    this.director.play(this.kor.build());
+  }
+
+  private onKorFinished() {
+    this.kor = null;
+    this.timeScale = 1;
+    this.storm = this.stormTarget = 0;
+    this.combat.active = false;
+    this.combat.targets = [];
+    this.combat.lock = null;
+    this.combat.limitRate = 1;
+    this.player.combat = false;
+    this.player.locked = false;
+    this.player.chocoFleeFrom = null;
+    this.cam.lockTarget = null;
+    this.cam.adoptCurrentView(this.player.position);
+    this.cam.cineWeight = 0;
+    this.hud.setVisible(false);
+    this.setState('aftermath');
+    this.audio?.music.setState('victory', { fade: 1.5 });
+    this.ui.showBanner('VICTORY<small>ELDER ZOLOM defeated · EXP 18400 · AP 1200 · Materia: Knights of Round ★</small>', 'victory', 5.5);
+    this.sfx('ui_levelup', {});
+    this.player.cloud.play('victory', { onEvent: (e) => e === 'spinStart' && this.sfx('whoosh_big', { position: this.player.cloudPos }) });
+  }
+
   private bossFinale() {
     this.ui.showHint('The Elder Zolom is faltering! Fill your <b style="color:#ff6db4">LIMIT</b> and press <kbd>R</kbd>', 6);
     this.combat.limitRate = 5;
   }
 
   private updateWeather(real: number) {
+    if (this.state === 'kor') return; // the summon owns the sky
     this.storm = damp(this.storm, this.stormTarget, 0.5, real);
     U.storm.value = this.storm;
     if (Math.abs(this.storm - this.stormTarget) > 0.001 || this.storm > 0.001) {

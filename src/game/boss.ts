@@ -63,6 +63,18 @@ export class ElderZolom implements Target {
   private speedMul = 1;
   private emergeY = -18;
   private deathT = 0;
+  /** Knights of Round: the director drives the head directly. */
+  korMode = false;
+  readonly korHead = new THREE.Vector3();
+  readonly korLook = new THREE.Vector3();
+  korJaw = 0.3;
+  private reactOff = new THREE.Vector3();
+  private reactVel = new THREE.Vector3();
+  /** Knock the head in a direction (KoR strikes). */
+  react(dir: THREE.Vector3, power: number) {
+    this.reactVel.addScaledVector(dir, power * 14);
+    this.actor.flash.value.setRGB(1.5 * power, 1.3 * power, 1.1 * power);
+  }
 
   constructor(
     private hf: Heightfield,
@@ -228,6 +240,13 @@ export class ElderZolom implements Target {
       a.root.visible = false;
       return;
     }
+    if (this.korMode && this.phase !== 'dead') {
+      this.headTarget.copy(this.korHead);
+      this.lookTarget.copy(this.korLook);
+      jaw = this.korJaw;
+      headLerp = 2.2;
+      this.stopBeam();
+    } else
     if (this.phase === 'emerging') {
       const k = smoothstep(0.6, 3.2, this.phaseT);
       this.emergeY = lerp(-22, 0, k);
@@ -409,9 +428,13 @@ export class ElderZolom implements Target {
         }
       }
     }
-    // Smooth head motion.
+    // Smooth head motion + strike reactions (spring).
     const k = 1 - Math.exp(-dt * headLerp * (this.enraged ? 1.3 : 1));
     this.headPos.lerp(this.headTarget, k);
+    this.reactVel.addScaledVector(this.reactOff, -40 * dt);
+    this.reactVel.multiplyScalar(Math.exp(-dt * 5));
+    this.reactOff.addScaledVector(this.reactVel, dt);
+    this.headPos.add(this.reactOff.clone().multiplyScalar(dt * 8));
     this.headLook.lerp(this.lookTarget, 1 - Math.exp(-dt * 4));
     a.jawOpen = damp(a.jawOpen, jaw, 10, dt);
     this.layout(dt);

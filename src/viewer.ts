@@ -214,6 +214,26 @@ export async function runViewer(renderer: THREE.WebGPURenderer, what: string, pa
     }
   }
 
+  if (what === 'knights') {
+    const { KnightActor, KNIGHTS, KP } = await import('./cinematics/knights');
+    const t0 = performance.now();
+    const ks = KNIGHTS.map((d, i) => {
+      const k = new KnightActor(d, 1);
+      k.root.position.set((i - 6) * 1.1, 0, 0);
+      k.dissolve.value = 0;
+      k.setPose(KP[params.get('pose') || 'stand'] ?? KP.stand, 0.001);
+      k.update(0.1);
+      scene.add(k.root);
+      return k;
+    });
+    console.log('[viewer] knights built in', (performance.now() - t0).toFixed(0), 'ms', ks.length);
+    floor.scale.setScalar(2);
+    target = new THREE.Vector3(0, 1.1, 0);
+    dist = parseFloat(params.get('dist') || '12');
+    key.shadow.camera.left = key.shadow.camera.bottom = -8;
+    key.shadow.camera.right = key.shadow.camera.top = 8;
+  }
+
   const yaw = parseFloat(params.get('yaw') || '0.5');
   const pitch = parseFloat(params.get('pitch') || '0.08');
   const place = () => {
