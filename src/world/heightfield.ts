@@ -16,6 +16,7 @@ import {
   upperBedAt,
   RUIN_SITES,
   MONSTER_MEADOW,
+  BRIDGE,
 } from './layout';
 
 /** Height of the falling water sheet at a given z (ballistic arc from the lip). */
@@ -43,6 +44,8 @@ export class Heightfield {
   readonly splat = new Uint8Array(HF_RES * HF_RES * 4); // r path, g wet, b grass, a flowers
   readonly noise = new Simplex(7);
   road!: DistField;
+  /** Stone bridge deck where the road crosses the river gorge. */
+  bridge = { cx: 0, cz: 0, tx: 1, tz: 0, y0: 0, y1: 0, half: 28, width: 2.7 };
   trail!: DistField;
   stream!: DistField;
   upper!: DistField;
@@ -67,6 +70,15 @@ export class Heightfield {
       if (onProgress && (j & 63) === 0) onProgress(0.1 + 0.7 * (j / N));
     }
     this.computeNormals();
+    const bc = ROAD.closest(BRIDGE.x, BRIDGE.z);
+    const bt = ROAD.tangent(bc.t);
+    const b = this.bridge;
+    b.cx = bc.px;
+    b.cz = bc.pz;
+    b.tx = bt.x;
+    b.tz = bt.z;
+    b.y0 = this.terrainHeight(b.cx - b.tx * b.half, b.cz - b.tz * b.half) + 0.35;
+    b.y1 = this.terrainHeight(b.cx + b.tx * b.half, b.cz + b.tz * b.half) + 0.35;
     onProgress?.(0.9);
     this.computeSplat();
     onProgress?.(1);
@@ -313,8 +325,27 @@ export class Heightfield {
     return lerp(lerp(a, b, u), lerp(c, d, u), v);
   }
 
-  height(x: number, z: number): number {
+  terrainHeight(x: number, z: number): number {
     return this.sampleF(this.heights, x, z);
+  }
+
+  /** Deck height if (x,z) is on the bridge, else -Infinity. */
+  bridgeDeck(x: number, z: number): number {
+    const b = this.bridge;
+    const dx = x - b.cx,
+      dz = z - b.cz;
+    const s = dx * b.tx + dz * b.tz;
+    const l = -dx * b.tz + dz * b.tx;
+    if (Math.abs(s) > b.half || Math.abs(l) > b.width) return -Infinity;
+    const u = (s + b.half) / (b.half * 2);
+    // Gentle hump.
+    return b.y0 + (b.y1 - b.y0) * u + Math.sin(u * Math.PI) * 1.2;
+  }
+
+  height(x: number, z: number): number {
+    const t = this.sampleF(this.heights, x, z);
+    if (this.bridge.y0 === 0) return t;
+    return Math.max(t, this.bridgeDeck(x, z));
   }
 
   normal(x: number, z: number, out: { x: number; y: number; z: number }) {
@@ -355,9 +386,10 @@ export class Heightfield {
 
   surface(x: number, z: number): Surface {
     const h = this.height(x, z);
-    if (this.waterHeight(x, z) > h + 0.08) return 'water';
+    if (this.bridgeDeck(x, z) === -Infinity && this.waterHeight(x, z) > h + 0.08) return 'water';
     const ad = Math.hypot(x - ARENA.x, z - ARENA.z);
     if (ad < ARENA.radius) return 'stone';
+    if (this.bridgeDeck(x, z) > -Infinity) return 'stone';
     for (const s of RUIN_SITES) if (Math.hypot(x - s.x, z - s.z) < 9) return 'stone';
     if (this.splatAt(x, z, 0) > 0.45) return 'dirt';
     const nm = this.normals[(clamp(Math.round((z + HALF) / HF_CELL), 0, this.res - 1) * this.res + clamp(Math.round((x + HALF) / HF_CELL), 0, this.res - 1)) * 4 + 3] / 255;

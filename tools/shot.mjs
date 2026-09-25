@@ -1,13 +1,10 @@
 // Headless screenshot harness: node tools/shot.mjs "<query>" out.png [waitFrames] [--gl]
 import { chromium } from 'playwright';
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 const [,, query = '', out = 'tools/out/shot.png', wait = '30'] = process.argv;
 const useGL = process.argv.includes('--gl');
 fs.mkdirSync('tools/out', { recursive: true });
-const port = 5180 + Math.floor(Math.random() * 15);
-const server = spawn('npx', ['vite', '--port', String(port), '--strictPort'], { stdio: 'pipe' });
-await new Promise((r) => server.stdout.on('data', (d) => { if (String(d).includes('Local')) r(); }));
+const port = Number(process.env.PORT || 5173);
 const args = useGL
   ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']
   : ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-angle=swiftshader', '--use-webgpu-adapter=swiftshader', '--ignore-gpu-blocklist'];
@@ -27,5 +24,4 @@ console.log(JSON.stringify(info), 'elapsed', ((Date.now() - t0) / 1000).toFixed(
 const seen = new Set();
 for (const l of logs) { if (!seen.has(l)) { seen.add(l); console.log(l.slice(0, 600)); } }
 await browser.close();
-server.kill();
 process.exit(0);

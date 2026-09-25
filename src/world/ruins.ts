@@ -257,6 +257,8 @@ export class Ruins {
       stone.push(place(b, x, this.hf.height(x, z) + s * 0.2, z, rng.range(0, 6.28), rng.range(-0.3, 0.3), rng.range(-0.3, 0.3)));
     }
 
+    this.buildBridge(stone, glyphStone, rng);
+
     // Scattered ruin sites across the world.
     for (const site of RUIN_SITES) this.buildSite(site, stone, glyphStone, rng);
 
@@ -311,6 +313,64 @@ export class Ruins {
       addGlyphAttr(b, k === 7 ? 1 : 0);
       glyph.push(place(b, bx, by, bz, -rot, 0, a - Math.PI / 2));
     }
+  }
+
+  private buildBridge(stone: THREE.BufferGeometry[], glyph: THREE.BufferGeometry[], rng: RNG) {
+    const b = this.hf.bridge;
+    const rot = Math.atan2(b.tz, b.tx);
+    const at = (s: number, l: number) => ({ x: b.cx + b.tx * s - b.tz * l, z: b.cz + b.tz * s + b.tx * l });
+    const deck = (s: number) => this.hf.bridgeDeck(b.cx + b.tx * s, b.cz + b.tz * s);
+    // Deck slabs following the hump.
+    const seg = 14;
+    for (let k = 0; k < seg; k++) {
+      const s0 = -b.half + (k / seg) * b.half * 2,
+        s1 = -b.half + ((k + 1) / seg) * b.half * 2;
+      const sm = (s0 + s1) / 2;
+      const y = deck(sm);
+      const slope = Math.atan2(deck(s1) - deck(s0), s1 - s0);
+      const slab = block(s1 - s0 + 0.15, 1.1, b.width * 2 + 0.4, rng, 0.05);
+      const p = at(sm, 0);
+      stone.push(place(slab, p.x, y - 0.55, p.z, -rot, 0, slope));
+      // Parapets (some blocks missing).
+      for (const side of [-1, 1]) {
+        if (rng.next() < 0.18) continue;
+        const pw = block(s1 - s0 - 0.1, rng.range(0.6, 0.95), 0.45, rng, 0.07);
+        const q = at(sm, side * (b.width + 0.05));
+        stone.push(place(pw, q.x, y + 0.4, q.z, -rot, 0, slope));
+      }
+    }
+    // Piers and arches spanning the gorge.
+    const piers = [-14, 0, 14];
+    for (const ps of piers) {
+      const p = at(ps, 0);
+      const top = deck(ps) - 1.1;
+      const bottom = this.hf.terrainHeight(p.x, p.z) - 1.5;
+      const h = top - bottom;
+      const pier = block(3.0, h, b.width * 2 + 0.2, rng, 0.08);
+      addGlyphAttr(pier, 0);
+      stone.push(place(pier, p.x, bottom + h / 2, p.z, -rot));
+      const cut = block(3.4, 0.9, b.width * 2 + 0.8, rng, 0.06);
+      stone.push(place(cut, p.x, bottom + 2.2, p.z, -rot));
+      this.colliders.push({ x: p.x, z: p.z, r: 2.2 });
+    }
+    // Arch voussoirs between piers.
+    for (let a = 0; a < piers.length - 1; a++) {
+      const s0 = piers[a] + 1.5,
+        s1 = piers[a + 1] - 1.5;
+      const span = s1 - s0;
+      const n = 11;
+      for (let k = 0; k <= n; k++) {
+        const ang = (k / n) * Math.PI;
+        const s = (s0 + s1) / 2 - Math.cos(ang) * span / 2;
+        const spring = deck((s0 + s1) / 2) - 1.1 - span * 0.5;
+        const y = spring + Math.sin(ang) * span * 0.45;
+        const v = block(1.1, 1.6, b.width * 2, rng, 0.05);
+        addGlyphAttr(v, k === Math.floor(n / 2) ? 1 : 0);
+        const p = at(s, 0);
+        glyph.push(place(v, p.x, y, p.z, -rot, 0, ang - Math.PI / 2));
+      }
+    }
+    void LAKE;
   }
 
   private buildSite(site: (typeof RUIN_SITES)[number], stone: THREE.BufferGeometry[], glyph: THREE.BufferGeometry[], rng: RNG) {

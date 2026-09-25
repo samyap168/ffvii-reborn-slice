@@ -497,6 +497,7 @@ export class Vegetation {
     const h = hf.height(x, z);
     if (hf.waterHeight(x, z) > h - 0.5) return false;
     if (Math.hypot(x - ARENA.x, z - ARENA.z) < ARENA.radius + 12) return false;
+    if (Math.hypot(x - hf.bridge.cx, z - hf.bridge.cz) < hf.bridge.half + 6) return false;
     for (const s of RUIN_SITES) if (Math.hypot(x - s.x, z - s.z) < 16) return false;
     const N = hf.res;
     const i = clamp(Math.round((x + HALF) / 2), 0, N - 1),
