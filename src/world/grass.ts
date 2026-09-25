@@ -210,7 +210,7 @@ export class GrassField {
     col = col.mul(mix(float(0.8), float(1.2), vRand));
     col = col.add(vec3(0.06, 0.07, 0.02).mul(vGust).mul(vT)); // wind sheen
     mat.colorNode = col;
-    mat.roughnessNode = float(0.62);
+    mat.roughnessNode = float(0.88);
     // Translucency when backlit by the sun.
     const viewDir = normalize(positionWorld.sub(cameraPosition));
     const back = pow(saturate(dot(viewDir, U.sunDir)), 3.0);

@@ -5,7 +5,7 @@ import { positionLocal, normalize, vec3, float, mix, smoothstep, acos, atan, sin
 
 export const eyeGlow = uniform(1.0);
 
-export function makeEye(radius: number, iris: THREE.Color, opts: { pupil?: number; irisSize?: number; slit?: boolean } = {}) {
+export function makeEye(radius: number, iris: THREE.Color, opts: { pupil?: number; irisSize?: number; slit?: boolean; glow?: any } = {}) {
   const geo = new THREE.SphereGeometry(radius, 24, 16);
   const m = new THREE.MeshPhysicalNodeMaterial();
   const n = normalize(positionLocal);
@@ -26,7 +26,7 @@ export function makeEye(radius: number, iris: THREE.Color, opts: { pupil?: numbe
   m.roughnessNode = float(0.1);
   (m as any).clearcoatNode = float(1);
   (m as any).clearcoatRoughnessNode = float(0.02);
-  m.emissiveNode = irisCol.mul(irisMask.mul(float(1).sub(pupilMask))).mul(eyeGlow).mul(1.6);
+  m.emissiveNode = irisCol.mul(irisMask.mul(float(1).sub(pupilMask))).mul(opts.glow ?? eyeGlow).mul(1.6);
   const eye = new THREE.Mesh(geo, m);
   eye.name = 'eye';
   return eye;

@@ -11,10 +11,15 @@ import { Player } from './player';
 import { ColliderGrid } from './colliders';
 import { Director, path, V, type Sequence } from '../cinematics/director';
 import { UI } from '../ui/ui';
-import { PLAYER_START, ROAD, LAKE, ARENA } from '../world/layout';
+import { PLAYER_START, ROAD, LAKE, ARENA, MONSTER_MEADOW } from '../world/layout';
+import { VFX } from '../vfx/vfx';
+import { HUD } from '../ui/hud';
+import { PlayerCombat, MATERIA, type Target } from './combat';
+import { Ruinfang } from './enemies';
+import { PType } from '../vfx/particles';
 import { damp, clamp, wrapAngle, smoothstep, lerp } from '../core/math';
 
-export type GameState = 'loading' | 'title' | 'intro' | 'explore';
+export type GameState = 'loading' | 'title' | 'intro' | 'explore' | 'encounter' | 'combat' | 'victory';
 
 export class Game {
   readonly scene = new THREE.Scene();
@@ -36,6 +41,14 @@ export class Game {
   readonly params = new URLSearchParams(location.search);
   frames = 0;
   audio: any = null;
+  vfx!: VFX;
+  hud!: HUD;
+  combat!: PlayerCombat;
+  monster: Ruinfang | null = null;
+  private encounterT = 0;
+  private victoryT = 0;
+  private stateT = 0;
+  private realDt = 0;
 
   constructor(
     public renderer: THREE.WebGPURenderer,
@@ -70,6 +83,16 @@ export class Game {
     this.director = new Director(this.cam, this.post);
     this.cam.snapTo(this.player.position);
     this.cam.yaw = Math.PI + this.player.heading;
+    this.vfx = new VFX(this.scene, this.q.particleBudget, this.post, this.cam);
+    this.vfx.groundFn = (x, z) => this.world.hf.height(x, z);
+    this.scene.add(this.vfx.group);
+    this.hud = new HUD(this.ui.hudRoot, this.camera, MATERIA);
+    this.combat = new PlayerCombat(this.player, this.vfx, this.hud, this.cam, { play: (n, o) => this.sfx(n, o) });
+    this.combat.onPlayerDown = () => this.phoenixDown();
+    this.combat.onLimitReady = () => this.ui.showHint('LIMIT BREAK ready — press <kbd>R</kbd>', 4);
+    prog(0.86, 'A shadow stirs in the meadow');
+    await tick();
+    this.spawnMonster();
     this.hookPlayerEvents();
     // Warm up shaders so the first frames don't hitch.
     prog(0.92, 'Compiling shaders');
@@ -82,13 +105,61 @@ export class Game {
     prog(1, 'Ready');
   }
 
+  sfx(name: string, opts: any = {}) {
+    this.audio?.play(name, opts);
+  }
+
+  private spawnMonster() {
+    const cq = this.q.level === 'low' ? 'low' : 'high';
+    const pos = new THREE.Vector3(MONSTER_MEADOW.x, 0, MONSTER_MEADOW.z);
+    this.monster = new Ruinfang(
+      this.world.hf,
+      this.grid,
+      {
+        sfx: (n, p, o) => this.sfx(n, { position: p, ...(o ?? {}) }),
+        attackPlayer: (dmg, from, heavy, shape) => {
+          if (this.player.mounted) return;
+          const cp = this.player.cloudPos.clone().add(V(0, 1, 0));
+          if (cp.distanceTo(shape.center) < shape.radius + 0.5) this.combat.hurt(dmg, from, heavy);
+          else if (this.combat.iframe > 0 && cp.distanceTo(shape.center) < shape.radius + 1.5) this.hud.number(cp, 'Dodge', 'miss');
+        },
+        footstep: (p, power) => {
+          this.sfx('chocobo_step', { position: p, intensity: power * 0.8, surface: this.world.hf.surface(p.x, p.z) });
+          if (power > 0.8) this.vfx.dust(p, 0.6);
+        },
+        onNotice: () => this.onMonsterNotice(),
+        onRoar: () => this.onMonsterRoar(),
+        onDeath: () => this.onMonsterDeath(),
+        vfxDissolve: (p) => this.vfx.lifestream(p, 2, 0.4),
+        vfxSlam: (p, power) => {
+          this.vfx.fx.shockwave(p, new THREE.Color(0.7, 0.6, 0.5), 5 * power, 0.5);
+          this.vfx.debris(p, Math.round(16 * power), power);
+          this.vfx.shake(0.4 * power);
+          this.sfx('debris_rumble', { position: p, intensity: power });
+        },
+      },
+      pos,
+      2.3,
+      cq,
+    );
+    this.scene.add(this.monster.actor.root);
+    this.combat.targets = [this.monster];
+  }
+
   private hookPlayerEvents() {
     const p = this.player;
     p.events.footstep = (who, pos, intensity, surface) => {
       this.audio?.play(who === 'chocobo' ? 'chocobo_step' : 'cloud_step', { position: pos, intensity, surface });
+      if (surface === 'dirt' || surface === 'sand') this.vfx.dust(pos, who === 'chocobo' ? 0.5 + intensity * 0.6 : 0.3, surface === 'sand' ? new THREE.Color(0.55, 0.5, 0.4) : undefined);
+      else if (surface === 'grass' && who === 'chocobo' && intensity > 0.6) this.vfx.grassBits(pos, 0.6);
     };
+    p.events.splash = (pos, size) => this.vfx.splash(pos.clone().setY(this.world.hf.waterHeight(pos.x, pos.z)), size * 0.7);
     p.events.kweh = (pos) => this.audio?.play('chocobo_kweh', { position: pos.clone().setY(pos.y + 2) });
-    p.events.land = (pos, who) => this.audio?.play(who === 'cloud' ? 'cloud_land' : 'chocobo_step', { position: pos, intensity: 1 });
+    p.events.land = (pos, who) => {
+      this.audio?.play(who === 'cloud' ? 'cloud_land' : 'chocobo_step', { position: pos, intensity: 1 });
+      this.vfx.dust(pos, who === 'cloud' ? 1.6 : 1.2);
+      if (who === 'chocobo') this.vfx.feathers(pos.clone().add(V(0, 1.4, 0)), 4);
+    };
     p.events.dismount = () => this.audio?.play('dismount_jump', { position: p.chocoPos });
     p.events.mount = () => this.audio?.play('mount', { position: p.chocoPos });
   }
@@ -244,7 +315,11 @@ export class Game {
 
   // ---------------------------------------------------------------------------
   update(dtRaw: number) {
-    const dt = Math.min(dtRaw, 1 / 20) * this.timeScale;
+    const real = Math.min(dtRaw, 1 / 20);
+    this.realDt = real;
+    const vScale = this.vfx ? this.vfx.timeScale(real) : 1;
+    const dt = real * this.timeScale * vScale;
+    this.stateT += real;
     this.time += dt;
     U.time.value = this.time;
     const input = this.input;
@@ -253,10 +328,16 @@ export class Game {
     // Autopilot during the intro: follow the road.
     if (this.autopilot) this.driveAlongRoad(dt);
 
-    const controllable = this.state === 'explore';
+    const controllable = (this.state === 'explore' || this.state === 'encounter' || this.state === 'combat' || this.state === 'victory') && !(this.director.active && this.director.seq?.name !== 'title');
     input.enabled = controllable;
     if (controllable && !input.locked && input.wasPressed('Mouse0')) input.requestLock();
+    this.flowUpdate(real, dt);
+    this.combat.update(dt, input);
     this.player.update(dt, input, this.cam.yaw);
+    this.combat.tickVisuals(dt);
+    this.monster?.update(dt, this.player.mounted ? this.player.chocoPos : this.player.cloudPos, this.player.mounted);
+    const lockP = this.combat.lock && this.combat.active ? this.combat.lock.lockPoint() : null;
+    this.hud.update(real, { hp: this.combat.hp, maxHp: this.combat.maxHp, mp: this.combat.mp, maxMp: this.combat.maxMp, limit: this.combat.limit, atb: this.combat.atb, visible: true }, this.combat.active && this.combat.lock ? { name: this.combat.lock.name, hp: this.combat.lock.hp, maxHp: this.combat.lock.maxHp, stagger: this.combat.lock.stagger, staggered: this.combat.lock.staggered } : null, lockP, this.combat.slotsEnabled);
 
     // Camera follow.
     const p = this.player;
@@ -267,7 +348,7 @@ export class Game {
     this.cam.autoFollow = p.mounted && p.chocoSpeed > 3 ? 1.2 : 0;
     this.cam.followYaw = Math.PI + p.chocoHeading;
     this.cam.fovBase = 58 + (p.mounted ? clamp((p.chocoSpeed - 9) / 8, 0, 1) * 10 : 0);
-    this.director.update(dt);
+    this.director.update(real);
     this.cam.update(dt, input, controllable);
     this.ui.letterbox(this.director.letterbox);
 
@@ -278,10 +359,158 @@ export class Game {
     U.playerPos.value.copy(p.position);
 
     this.world.update(dt, this.time, this.camera);
+    this.vfx.update(dt, real);
     this.updateSunShafts();
     this.audioFrame(dt);
     this.ui.update(dt);
     input.endFrame();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Encounter -> combat -> victory flow
+  // ---------------------------------------------------------------------------
+  private setState(s: GameState) {
+    this.state = s;
+    this.stateT = 0;
+  }
+
+  private onMonsterNotice() {
+    if (this.state !== 'explore') return;
+    this.setState('encounter');
+    this.audio?.music.setState('encounter', { fade: 1.5 });
+    this.sfx('enemy_growl', { position: this.monster!.actor.point('head') });
+    this.ui.showHint('Something is watching you…', 3);
+  }
+
+  private onMonsterRoar() {
+    const m = this.monster!;
+    if (this.state === 'explore') this.setState('encounter');
+    // Brief cinematic insert: low angle on the roaring beast, slow motion.
+    const head = () => m.actor.point('head');
+    const side = () => {
+      const h = m.heading;
+      return V(Math.cos(h), 0, -Math.sin(h));
+    };
+    const fwd = () => V(Math.sin(m.heading), 0, Math.cos(m.heading));
+    this.vfx.slow(0.55, 2.0);
+    this.director.play({
+      name: 'roar',
+      duration: 2.5,
+      letterbox: true,
+      blendIn: 0.35,
+      blendOut: 0.7,
+      shots: [
+        {
+          start: 0,
+          end: 2.5,
+          fn: (u) => {
+            const hp = head();
+            const g = this.world.hf.height(hp.x, hp.z);
+            const toP = this.player.position.clone().sub(m.position).setY(0).normalize();
+            const sideP = V(toP.z, 0, -toP.x);
+            const pos = hp.clone().addScaledVector(toP, 5.5 - u * 0.9).addScaledVector(sideP, 2.2).setY(g + 0.8 + u * 0.3);
+            return { pos, look: hp.clone().add(V(0, 0.1, 0)), fov: 42 - u * 6, dof: 1, focus: pos.distanceTo(hp), range: 2.5, bokeh: 2.5 };
+          },
+        },
+      ],
+      events: [
+        { t: 0.8, fn: () => { this.vfx.shake(0.55); this.vfx.radialBlur(0.8); this.vfx.aberration(0.8); } },
+        { t: 1.8, fn: () => this.vfx.dust(m.position.clone().addScaledVector(fwd(), 0.6), 3) },
+      ],
+      onEnd: () => {
+        this.cam.lockTarget = m.lockPoint();
+        if (this.player.mounted) this.ui.showHint('<kbd>F</kbd> Leap down and draw the Buster Sword', 5);
+        else this.beginCombat();
+      },
+    });
+  }
+
+  private beginCombat() {
+    if (this.state === 'combat') return;
+    this.setState('combat');
+    this.combat.active = true;
+    this.combat.lockOn = true;
+    this.player.combat = true;
+    this.player.chocoFleeFrom = this.monster!.position;
+    this.hud.setVisible(true);
+    this.audio?.music.setState('battle', { fade: 0.4 });
+    this.ui.hideHint();
+    this.ui.showHint('<kbd>LMB</kbd> combo · <kbd>RMB</kbd> hold heavy · <kbd>Space</kbd> dodge · <kbd>1-4</kbd> materia · <kbd>Q</kbd> lock-on', 6);
+  }
+
+  private dismountIntoCombat() {
+    const p = this.player;
+    this.vfx.slow(0.45, 0.9);
+    this.sfx('sword_draw', { position: p.chocoPos });
+    p.dismount(() => {
+      this.vfx.dust(p.cloudPos, 2.2);
+      this.vfx.fx.shockwave(p.cloudPos.clone(), new THREE.Color(0.8, 0.8, 0.9), 3, 0.4);
+      this.vfx.shake(0.35);
+    });
+    this.beginCombat();
+  }
+
+  private onMonsterDeath() {
+    this.vfx.slow(0.25, 1.6);
+    this.vfx.flash(0.4);
+    this.combat.lockOn = false;
+    this.victoryT = 0;
+    this.setState('victory');
+    setTimeout(() => this.audio?.music.setState('victory', { immediate: true }), 900);
+  }
+
+  private phoenixDown() {
+    this.vfx.slow(0.3, 1.2);
+    this.ui.showBanner('Phoenix Down', 'victory', 2);
+    setTimeout(() => {
+      this.combat.hp = Math.round(this.combat.maxHp * 0.6);
+      this.vfx.feathers(this.player.cloudPos.clone().add(V(0, 2, 0)), 14);
+      this.vfx.cure(this.player.cloudPos.clone().add(V(0, 1, 0)));
+      this.sfx('cure_cast', { position: this.player.cloudPos });
+    }, 1400);
+  }
+
+  private flowUpdate(real: number, dt: number) {
+    const p = this.player;
+    const m = this.monster;
+    if (this.state === 'encounter' && m) {
+      this.cam.lockTarget = m.awareness === 'hostile' ? m.lockPoint() : null;
+      if (p.mounted && !this.director.active && (this.input.wasPressed('KeyF') || (m.awareness === 'hostile' && (m.playerDist < 16 || this.stateT > 9)))) {
+        m.provoke();
+        this.dismountIntoCombat();
+      }
+      if (!p.mounted && m.awareness === 'hostile') this.beginCombat();
+      if (m.awareness === 'unaware') {
+        this.setState('explore');
+        this.cam.lockTarget = null;
+        this.audio?.music.setState('explore', { fade: 3 });
+      }
+    }
+    if (this.state === 'combat' && m && !this.player.mounted) {
+      // Keep the chocobo clear of the fight.
+      this.player.chocoFleeFrom = m.position;
+    }
+    if (this.state === 'victory') {
+      this.victoryT += real;
+      if (this.victoryT > 1.6 && this.victoryT - real <= 1.6) {
+        this.ui.showBanner('VICTORY<small>EXP 1250 · AP 80 · 640 GIL · Phoenix Down ×1</small>', 'victory', 4.2);
+        this.player.cloud.play('victory', { onEvent: (e) => e === 'spinStart' && this.sfx('whoosh_big', { position: p.cloudPos }) });
+        this.sfx('ui_levelup', {});
+      }
+      if (this.victoryT > 6.5) {
+        this.combat.active = false;
+        this.player.combat = false;
+        this.player.chocoFleeFrom = null;
+        this.hud.setVisible(false);
+        this.cam.lockTarget = null;
+        this.setState('explore');
+        this.audio?.music.setState('explore', { fade: 4 });
+        this.ui.showHint('The ground trembles… something stirs beneath the lake. Head for the lakeside ruins. <kbd>F</kbd> call & mount your chocobo', 8);
+        this.vfx.shake(0.3);
+        this.sfx('boss_quake', {});
+      }
+    }
+    void dt;
   }
 
   private driveAlongRoad(dt: number) {

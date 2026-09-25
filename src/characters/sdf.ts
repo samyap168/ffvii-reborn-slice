@@ -315,11 +315,50 @@ export class SdfEvaluator {
     model.bones.forEach((b, i) => boneIndex.set(b, i));
     this.comp = model.prims.map((p) => compile(p, matIndex, boneIndex));
     this.mats = mats;
+    this.buildBuckets();
+  }
+
+  // Spatial buckets: each lists (in authoring order) the primitives whose
+  // bounds, expanded by blend radius + margin, overlap the bucket.
+  private bMin: Vec3 = [0, 0, 0];
+  private bSize = 0.2;
+  private bN: Vec3 = [1, 1, 1];
+  private buckets: Compiled[][] = [];
+  private readonly margin = 0.25;
+  private buildBuckets() {
+    const bb = this.bounds();
+    const ext = Math.max(bb.max[0] - bb.min[0], bb.max[1] - bb.min[1], bb.max[2] - bb.min[2]);
+    this.bSize = Math.max(0.05, ext / 40);
+    for (let a = 0; a < 3; a++) {
+      this.bMin[a] = bb.min[a] - this.margin;
+      this.bN[a] = Math.max(1, Math.ceil((bb.max[a] - bb.min[a] + this.margin * 2) / this.bSize));
+    }
+    const [nx, ny, nz] = this.bN;
+    this.buckets = Array.from({ length: nx * ny * nz }, () => []);
+    for (const c of this.comp) {
+      const m = c.k + this.margin;
+      const i0 = Math.max(0, Math.floor((c.min[0] - m - this.bMin[0]) / this.bSize)),
+        i1 = Math.min(nx - 1, Math.floor((c.max[0] + m - this.bMin[0]) / this.bSize));
+      const j0 = Math.max(0, Math.floor((c.min[1] - m - this.bMin[1]) / this.bSize)),
+        j1 = Math.min(ny - 1, Math.floor((c.max[1] + m - this.bMin[1]) / this.bSize));
+      const k0 = Math.max(0, Math.floor((c.min[2] - m - this.bMin[2]) / this.bSize)),
+        k1 = Math.min(nz - 1, Math.floor((c.max[2] + m - this.bMin[2]) / this.bSize));
+      for (let k = k0; k <= k1; k++) for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) this.buckets[(k * ny + j) * nx + i].push(c);
+    }
+  }
+
+  listAt(x: number, y: number, z: number): Compiled[] | null {
+    const i = Math.floor((x - this.bMin[0]) / this.bSize),
+      j = Math.floor((y - this.bMin[1]) / this.bSize),
+      k = Math.floor((z - this.bMin[2]) / this.bSize);
+    if (i < 0 || j < 0 || k < 0 || i >= this.bN[0] || j >= this.bN[1] || k >= this.bN[2]) return null;
+    return this.buckets[(k * this.bN[1] + j) * this.bN[0] + i];
   }
 
   dist(x: number, y: number, z: number): number {
-    let d = 1e9;
-    const comp = this.comp;
+    let d = this.margin * 1.5;
+    const comp = this.listAt(x, y, z);
+    if (!comp || comp.length === 0) return this.margin * 1.5;
     for (let i = 0; i < comp.length; i++) {
       const c = comp[i];
       if (c.op === 2) continue;
@@ -516,7 +555,7 @@ export function meshSdf(model: SdfModel, cell: number, opts: { weightSigma?: num
     let best = 1e9,
       bestMat = 0;
     boneW.fill(0);
-    for (const c of comp) {
+    for (const c of ev.listAt(x, y, z) ?? comp) {
       if (c.op === 1) continue;
       const bd = boxDist(x, y, z, c.min, c.max);
       if (c.op === 2) {

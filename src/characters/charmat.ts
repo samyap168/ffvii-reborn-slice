@@ -49,6 +49,12 @@ export interface CharMatOpts {
   flash?: any;
   rimColor?: THREE.Color;
   shells?: boolean;
+  /** Multiplier on the per-vertex emissive (glowing veins, eyes...). */
+  emissiveScale?: any;
+  /** Tint for per-vertex emissive. */
+  emissiveTint?: any;
+  /** 0..1 erosion into Lifestream sparkles. */
+  dissolve?: any;
 }
 
 export function characterMaterial(opts: CharMatOpts = {}) {
@@ -110,7 +116,7 @@ export function characterMaterial(opts: CharMatOpts = {}) {
   (m as any).sheenNode = is(1).mul(0.25).add(is(5).mul(0.5)).add(is(4).mul(0.2));
   (m as any).sheenColorNode = mix(col.mul(2.0).add(vec3(0.02, 0.025, 0.04)), col.mul(1.3).add(0.05), is(5).add(is(4)));
   (m as any).sheenRoughnessNode = float(0.45);
-  (m as any).clearcoatNode = is(3).mul(0.6).add(is(9)).add(is(6).mul(0.4));
+  (m as any).clearcoatNode = is(3).mul(0.6).add(is(9)).add(is(6).mul(0.12));
   (m as any).clearcoatRoughnessNode = float(0.15);
 
   // Rim light + emissive + subsurface-ish skin/feather wrap.
@@ -119,9 +125,19 @@ export function characterMaterial(opts: CharMatOpts = {}) {
   const back = pow(saturate(dot(V.negate(), U.sunDir)), 2.0);
   const sss = is(0).mul(0.3).add(is(5).mul(0.25)).add(is(4).mul(0.25));
   let emi: any = col.mul(pbr.w).mul(2.0);
+  if (opts.emissiveScale) emi = emi.mul(opts.emissiveScale);
+  if (opts.emissiveTint) emi = emi.mul(opts.emissiveTint);
   emi = emi.add(col.mul(U.sunColor).mul(rim.mul(back).mul(sss).mul(U.sunIntensity).mul(0.6)));
   emi = emi.add(vec3(0.5, 0.6, 0.8).mul(rim.mul(0.04)));
   if (opts.flash) emi = emi.add(opts.flash);
+  if (opts.dissolve) {
+    const dn = mx_fractal_noise_float(rest.mul(6.0), 3, 2.0, 0.5).mul(0.5).add(0.5);
+    const d = opts.dissolve;
+    const edge = saturate(float(1).sub(abs(dn.sub(d)).mul(18.0)));
+    emi = emi.add(vec3(0.3, 1.0, 0.75).mul(edge.mul(4.0)).mul(saturate(d.mul(20.0))));
+    m.alphaTest = 0.5;
+    m.opacityNode = saturate(dn.sub(d).mul(40.0).add(0.5));
+  }
   m.emissiveNode = emi;
   void normalView;
   void equal;

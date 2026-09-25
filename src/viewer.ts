@@ -137,6 +137,35 @@ export async function runViewer(renderer: THREE.WebGPURenderer, what: string, pa
     }
   }
 
+  if (what === 'monster') {
+    const { MonsterActor } = await import('./characters/monster');
+    const t0 = performance.now();
+    const m = new MonsterActor('high');
+    console.log('[viewer] monster built in', (performance.now() - t0).toFixed(0), 'ms');
+    scene.add(m.root);
+    m.glow.value = 1.2;
+    const st = (params.get('state') || 'idle') as any;
+    const spd = parseFloat(params.get('speed') || '0');
+    const sim = parseFloat(params.get('sim') || '0');
+    m.setState(st);
+    for (let t = 0; t < sim; t += 1 / 60) {
+      m.speed = spd;
+      m.root.position.z += spd / 60;
+      m.update(1 / 60);
+    }
+    m.update(0.001);
+    target = new THREE.Vector3(0, 1.1, m.root.position.z - 0.4);
+    floor.position.z = m.root.position.z;
+    key.target.position.copy(target);
+    scene.add(key.target);
+    key.position.copy(target).add(new THREE.Vector3(2, 3, 3));
+    dist = parseFloat(params.get('dist') || '7');
+    if (params.has('headshot')) {
+      target = m.point('head').add(new THREE.Vector3(0, 0, 0.2));
+      dist = 1.8;
+    }
+  }
+
   const yaw = parseFloat(params.get('yaw') || '0.5');
   const pitch = parseFloat(params.get('pitch') || '0.08');
   const place = () => {

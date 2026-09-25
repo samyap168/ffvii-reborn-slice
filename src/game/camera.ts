@@ -79,7 +79,7 @@ export class GameCamera {
       this.yaw = dampAngle(this.yaw, wantYaw + 0.35, 5, dt);
       yaw = this.yaw;
       const flat = Math.hypot(to.x, to.z);
-      const wantPitch = clamp(0.12 - Math.atan2(to.y, flat) * 0.5, -0.1, 0.6);
+      const wantPitch = clamp(0.24 - Math.atan2(to.y, flat) * 0.5, 0.12, 0.6);
       this.pitch = damp(this.pitch, wantPitch, 3, dt);
       pitch = this.pitch;
       focus.lerp(this.lockTarget.clone().setY(focus.y), clamp(0.28 - flat * 0.004, 0.05, 0.3));
@@ -89,7 +89,7 @@ export class GameCamera {
     let dist = this.distance;
     // Terrain collision: pull in if the ground blocks the view.
     const hitT = this.hf.raycast(focus.x, focus.y, focus.z, dir.x, dir.y, dir.z, dist);
-    if (hitT < dist) dist = Math.max(1.2, hitT - 0.4);
+    if (hitT < dist) dist = Math.max(2.2, hitT - 0.4);
     const pos = focus.clone().addScaledVector(dir, dist);
     const gy = this.hf.height(pos.x, pos.z) + 0.5;
     if (pos.y < gy) pos.y = gy;
