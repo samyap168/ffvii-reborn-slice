@@ -82,6 +82,7 @@ export class VFX {
   }
 
   update(dt: number, realDt: number) {
+    this.tickers = this.tickers.filter((f) => f(dt));
     this.p.update(dt);
     this.fx.update(dt);
     this.trail.update(dt);
@@ -221,6 +222,41 @@ export class VFX {
       const a = Math.random() * Math.PI * 2,
         r = rnd(1.2, 2.6);
       this.p.spawn({ pos: center.clone().add(new THREE.Vector3(Math.cos(a) * r, rnd(-0.2, 2.2), Math.sin(a) * r)), vel: new THREE.Vector3(0, rnd(0.2, 1.4), 0), life: rnd(1.0, 2.0), size: rnd(0.03, 0.08), color: C(0.6, 0.85, 1.0), colorEnd: C(1.0, 0.5, 0.8), type: PType.Mote, orbit: { center, speed: 3.5 * intensity, pull: 0.5 }, emissive: 6 });
+    }
+  }
+
+  /** A burning meteor streaking down onto `target` after `delay` seconds. */
+  meteor(target: THREE.Vector3, delay: number, onImpact: () => void, scale = 1) {
+    const from = target.clone().add(new THREE.Vector3(rnd(-25, 25), 110, rnd(-25, 25)));
+    let t = 0;
+    const tick = (dt: number) => {
+      t += dt;
+      const u = Math.min(1, t / delay);
+      const e = u * u;
+      const p = from.clone().lerp(target, e);
+      this.p.spawn({ pos: p, vel: rv(1), life: 0.5, size: 2.2 * scale, sizeEnd: 0.6, color: C(1, 0.5, 0.15), colorEnd: C(0.6, 0.05, 0.02), type: PType.Flame, emissive: 6, turb: 2 });
+      this.p.spawn({ pos: p, life: 1.4, size: 1.6 * scale, sizeEnd: 4, color: C(0.15, 0.1, 0.1), alpha: 0.5, type: PType.Smoke, drag: 1 });
+      this.p.spawn({ pos: p, life: 0.12, size: 3.5 * scale, color: C(1, 0.6, 0.3), type: PType.Glow, emissive: 6 });
+      if (u >= 1) {
+        this.fire(target.clone().add(new THREE.Vector3(0, 1, 0)), 1.4 * scale);
+        this.debris(target, 30, 1.4 * scale);
+        this.fx.shockwave(target, C(1, 0.35, 0.1), 10 * scale, 0.7);
+        this.shake(0.7);
+        onImpact();
+        return false;
+      }
+      return true;
+    };
+    this.tickers.push(tick);
+  }
+  private tickers: ((dt: number) => boolean)[] = [];
+
+  /** Storm rain around a point (call every frame while raining). */
+  rain(center: THREE.Vector3, intensity: number, dt: number) {
+    const n = Math.round(intensity * 900 * dt);
+    for (let i = 0; i < n; i++) {
+      const p = center.clone().add(new THREE.Vector3(rnd(-22, 22), rnd(8, 18), rnd(-22, 22)));
+      this.p.spawn({ pos: p, vel: new THREE.Vector3(3, -26, 1.5), life: 0.8, size: 0.012, color: C(0.6, 0.65, 0.75), type: PType.Spark, stretch: 0.03, emissive: 0.8, alpha: 0.6, floor: this.groundFn(p.x, p.z) });
     }
   }
 

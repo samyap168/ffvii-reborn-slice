@@ -27,6 +27,8 @@ export class GameCamera {
   fovBase = 58;
   fovKick = 0;
   lockTarget: THREE.Vector3 | null = null;
+  /** 0..1: how much the view tilts toward a tall lock target (boss). */
+  lockTilt = 0;
   /** 0 = gameplay, 1 = cinematic shot fully in control. */
   cineWeight = 0;
   cineShot: CineShot | null = null;
@@ -83,6 +85,10 @@ export class GameCamera {
       this.pitch = damp(this.pitch, wantPitch, 3, dt);
       pitch = this.pitch;
       focus.lerp(this.lockTarget.clone().setY(focus.y), clamp(0.28 - flat * 0.004, 0.05, 0.3));
+      if (this.lockTilt > 0) {
+        focus.y = lerp(focus.y, this.lockTarget.y, this.lockTilt * 0.22);
+        pitch = lerp(pitch, 0.08, this.lockTilt);
+      }
     }
 
     const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));

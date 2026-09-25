@@ -166,6 +166,54 @@ export async function runViewer(renderer: THREE.WebGPURenderer, what: string, pa
     }
   }
 
+  if (what === 'serpent') {
+    const { SerpentActor } = await import('./characters/serpent');
+    const t0 = performance.now();
+    const sp = new SerpentActor('high');
+    console.log('[viewer] serpent built in', (performance.now() - t0).toFixed(0), 'ms');
+    scene.add(sp.root);
+    const P = [
+      [0, 8, 0],
+      [0, 7, -4],
+      [1, 4, -9],
+      [0, 0.5, -14],
+      [-2, -1.5, -20],
+      [0, 2, -27],
+      [2, -3, -36],
+    ];
+    P.forEach((p, i) => sp.curvePts[i].set(p[0], p[1], p[2]));
+    sp.headDir.set(0, -0.2, 1);
+    sp.jawOpen = parseFloat(params.get('jaw') || '0.3');
+    sp.frill = 1;
+    sp.update(0.016);
+    if (params.has('nrm')) sp.body.material = new THREE.MeshNormalNodeMaterial();
+    if (params.has('stdmat')) sp.body.material = new THREE.MeshStandardNodeMaterial({ color: 0x0a2018, roughness: 0.6 });
+    if (params.has('noemi')) {
+      const { vec3 } = await import('three/tsl');
+      (sp.body.material as any).emissiveNode = vec3(0, 0, 0);
+    }
+    if (params.has('nonrm')) {
+      (sp.body.material as any).normalNode = null;
+      (sp.body.material as any).clearcoatNode = null;
+      (sp.body.material as any).needsUpdate = true;
+    }
+    if (params.has('nocol')) {
+      const { vec3 } = await import('three/tsl');
+      (sp.body.material as any).colorNode = vec3(1, 0, 0);
+    }
+    floor.scale.setScalar(8);
+    target = new THREE.Vector3(0, 5, -8);
+    dist = parseFloat(params.get('dist') || '30');
+    key.shadow.camera.left = key.shadow.camera.bottom = -30;
+    key.shadow.camera.right = key.shadow.camera.top = 30;
+    key.shadow.camera.far = 100;
+    key.position.set(20, 30, 20);
+    if (params.has('headshot')) {
+      target = sp.headCenter();
+      dist = 9;
+    }
+  }
+
   const yaw = parseFloat(params.get('yaw') || '0.5');
   const pitch = parseFloat(params.get('pitch') || '0.08');
   const place = () => {

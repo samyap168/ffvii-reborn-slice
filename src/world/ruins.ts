@@ -122,7 +122,7 @@ export function stoneMaterial(glyphPulse: any) {
   m.normalNode = normalize(cameraViewMatrix.mul(vec4(nn, 0)).xyz);
   // Faint Cetra glyphs etched into some stones: glowing lines.
   const g = attribute('glyph', 'float');
-  const lines = smoothstep(0.93, 0.985, abs(sin(p.y.mul(3.1).add(sin(p.x.mul(1.7).add(p.z.mul(1.3))).mul(1.6)))));
+  const lines = smoothstep(0.975, 0.995, abs(sin(p.y.mul(3.1).add(sin(p.x.mul(1.7).add(p.z.mul(1.3))).mul(1.6))))).mul(smoothstep(0.55, 0.75, mx_noise_float(p.mul(0.7)).mul(0.5).add(0.5)));
   const cells = smoothstep(0.45, 0.5, fract(p.x.mul(0.8).add(p.z.mul(0.8))).sub(0.5).abs().oneMinus().mul(fine));
   const glyph = lines.mul(cells.add(0.3)).mul(g);
   m.emissiveNode = vec3(0.25, 0.95, 0.75).mul(glyph).mul(glyphPulse);

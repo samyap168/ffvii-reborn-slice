@@ -17,9 +17,11 @@ import { HUD } from '../ui/hud';
 import { PlayerCombat, MATERIA, type Target } from './combat';
 import { Ruinfang } from './enemies';
 import { PType } from '../vfx/particles';
+import { ElderZolom } from './boss';
+import { PRESET_DAY, PRESET_STORM, lerpPreset } from '../core/env';
 import { damp, clamp, wrapAngle, smoothstep, lerp } from '../core/math';
 
-export type GameState = 'loading' | 'title' | 'intro' | 'explore' | 'encounter' | 'combat' | 'victory';
+export type GameState = 'loading' | 'title' | 'intro' | 'explore' | 'encounter' | 'combat' | 'victory' | 'bossIntro' | 'boss' | 'limit' | 'kor' | 'aftermath';
 
 export class Game {
   readonly scene = new THREE.Scene();
@@ -45,6 +47,12 @@ export class Game {
   hud!: HUD;
   combat!: PlayerCombat;
   monster: Ruinfang | null = null;
+  boss!: ElderZolom;
+  monsterDefeated = false;
+  storm = 0;
+  stormTarget = 0;
+  private lightningT = 3;
+  private beam: any;
   private encounterT = 0;
   private victoryT = 0;
   private stateT = 0;
@@ -93,6 +101,9 @@ export class Game {
     prog(0.86, 'A shadow stirs in the meadow');
     await tick();
     this.spawnMonster();
+    prog(0.9, 'Something ancient sleeps beneath the lake');
+    await tick();
+    this.spawnBoss();
     this.hookPlayerEvents();
     // Warm up shaders so the first frames don't hitch.
     prog(0.92, 'Compiling shaders');
@@ -105,7 +116,18 @@ export class Game {
     prog(1, 'Ready');
   }
 
+  private breathLoop: any = null;
   sfx(name: string, opts: any = {}) {
+    if (name === 'boss_breath_start') {
+      this.breathLoop?.stop(0.1);
+      this.breathLoop = this.audio?.loop('boss_breath', opts) ?? null;
+      return;
+    }
+    if (name === 'boss_breath_stop') {
+      this.breathLoop?.stop(0.4);
+      this.breathLoop = null;
+      return;
+    }
     this.audio?.play(name, opts);
   }
 
@@ -146,6 +168,60 @@ export class Game {
     this.combat.targets = [this.monster];
   }
 
+  private spawnBoss() {
+    const cq = this.q.level === 'low' ? 'low' : 'high';
+    this.beam = this.vfx.fx.beam(new THREE.Color(0.35, 0.8, 1.0), 1.1);
+    this.beam.mesh.visible = false;
+    this.boss = new ElderZolom(
+      this.world.hf,
+      {
+        sfx: (n, p, o) => this.sfx(n, { position: p, ...(o ?? {}) }),
+        playerPos: () => (this.player.mounted ? this.player.chocoPos : this.player.cloudPos),
+        hurtPlayer: (dmg, from, heavy) => (this.player.mounted ? false : this.combat.hurt(dmg, from, heavy)),
+        playerInvuln: () => this.combat.iframe > 0,
+        telegraphCircle: (pos, r, secs, color) => this.vfx.fx.telegraph(pos, r, secs, color),
+        telegraphLine: (a, b, w, secs) => this.vfx.fx.telegraphLine(a, b, w, secs),
+        splash: (pos, size) => this.vfx.splash(pos, size),
+        slam: (pos, power) => {
+          this.vfx.fx.shockwave(pos, new THREE.Color(0.7, 0.75, 0.8), 8 * power, 0.6);
+          this.vfx.debris(pos, Math.round(24 * power), power);
+          this.vfx.shake(0.6 * power);
+          this.sfx('debris_rumble', { position: pos, intensity: power });
+        },
+        meteor: (target, delay, onImpact) => {
+          this.sfx('boss_meteor_fall', { position: target, delay: Math.max(0, delay - 1.2) });
+          this.vfx.meteor(target, delay, () => {
+            this.sfx('boss_meteor_impact', { position: target });
+            onImpact();
+          });
+        },
+        beam: this.beam,
+        breathFx: (pos, dir) => {
+          if (dir.lengthSq() === 0) {
+            // Charging: sparks converge on the mouth.
+            for (let i = 0; i < 3; i++) {
+              const o = new THREE.Vector3((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8);
+              this.vfx.p.spawn({ pos: pos.clone().add(o), vel: o.clone().multiplyScalar(-2.2), life: 0.45, size: 0.12, color: this.boss.phase === 'p2' ? [1, 0.4, 0.2] : [0.5, 0.9, 1.0], type: PType.Mote, emissive: 8 });
+            }
+            this.vfx.fx.lights.flash(pos, new THREE.Color(0.4, 0.8, 1.0), 40, 16, 0.12);
+          } else {
+            this.vfx.dust(pos, 1.2, new THREE.Color(0.3, 0.32, 0.35), 1.5);
+            for (let i = 0; i < 6; i++) this.vfx.p.spawn({ pos: pos.clone(), vel: new THREE.Vector3((Math.random() - 0.5) * 10, Math.random() * 8, (Math.random() - 0.5) * 10), life: 0.5, size: 0.06, color: [0.7, 0.9, 1.0], type: PType.Spark, stretch: 0.04, gravity: 10, emissive: 8 });
+            this.vfx.fx.lights.flash(pos, new THREE.Color(0.4, 0.8, 1.0), 120, 20, 0.15);
+            this.vfx.scorchMark(pos, 3, 0.8);
+            this.vfx.shake(0.15);
+          }
+        },
+        shake: (v) => this.vfx.shake(v),
+        onEnrage: () => this.bossEnrage(),
+        onFinale: () => this.bossFinale(),
+        onStagger: () => {},
+      },
+      cq,
+    );
+    this.scene.add(this.boss.actor.root);
+  }
+
   private hookPlayerEvents() {
     const p = this.player;
     p.events.footstep = (who, pos, intensity, surface) => {
@@ -169,6 +245,25 @@ export class Game {
     this.ui.hideLoader();
     if (skip === 'explore' || skip === 'intro') {
       this.enterExplore();
+      return;
+    }
+    if (skip === 'boss' || skip === 'enrage' || skip === 'kor') {
+      this.enterExplore();
+      this.monsterDefeated = true;
+      if (this.monster) {
+        this.monster.actor.root.visible = false;
+        (this.monster as any).awareness = 'dead';
+      }
+      this.player.dismount(undefined, true);
+      this.player.cloudPos.set(ARENA.x - 18, 0, ARENA.z + 20);
+      this.player.cloudAir = false;
+      this.player.chocoPos.set(ARENA.x - 40, 0, ARENA.z + 40);
+      this.startBossIntro(true);
+      if (skip === 'enrage') this.boss.hp = this.boss.maxHp * 0.56;
+      if (skip === 'kor') {
+        this.boss.hp = this.boss.maxHp * 0.1;
+        this.combat.limit = 0.99;
+      }
       return;
     }
     this.enterTitle();
@@ -328,7 +423,7 @@ export class Game {
     // Autopilot during the intro: follow the road.
     if (this.autopilot) this.driveAlongRoad(dt);
 
-    const controllable = (this.state === 'explore' || this.state === 'encounter' || this.state === 'combat' || this.state === 'victory') && !(this.director.active && this.director.seq?.name !== 'title');
+    const controllable = (this.state === 'explore' || this.state === 'encounter' || this.state === 'combat' || this.state === 'victory' || this.state === 'boss' || this.state === 'aftermath') && !(this.director.active && this.director.seq?.name !== 'title');
     input.enabled = controllable;
     if (controllable && !input.locked && input.wasPressed('Mouse0')) input.requestLock();
     this.flowUpdate(real, dt);
@@ -336,6 +431,8 @@ export class Game {
     this.player.update(dt, input, this.cam.yaw);
     this.combat.tickVisuals(dt);
     this.monster?.update(dt, this.player.mounted ? this.player.chocoPos : this.player.cloudPos, this.player.mounted);
+    this.boss.update(dt);
+    this.updateWeather(real);
     const lockP = this.combat.lock && this.combat.active ? this.combat.lock.lockPoint() : null;
     this.hud.update(real, { hp: this.combat.hp, maxHp: this.combat.maxHp, mp: this.combat.mp, maxMp: this.combat.maxMp, limit: this.combat.limit, atb: this.combat.atb, visible: true }, this.combat.active && this.combat.lock ? { name: this.combat.lock.name, hp: this.combat.lock.hp, maxHp: this.combat.lock.maxHp, stagger: this.combat.lock.stagger, staggered: this.combat.lock.staggered } : null, lockP, this.combat.slotsEnabled);
 
@@ -347,10 +444,16 @@ export class Game {
     this.cam.targetDistance = p.mounted ? clamp(this.cam.targetDistance, 5.5, 14) : this.cam.targetDistance;
     this.cam.autoFollow = p.mounted && p.chocoSpeed > 3 ? 1.2 : 0;
     this.cam.followYaw = Math.PI + p.chocoHeading;
-    this.cam.fovBase = 58 + (p.mounted ? clamp((p.chocoSpeed - 9) / 8, 0, 1) * 10 : 0);
+    const bossCam = this.state === 'boss' ? 1 : 0;
+    this.cam.lockTilt = damp(this.cam.lockTilt, bossCam, 2, real);
+    if (bossCam) this.cam.targetDistance = Math.max(this.cam.targetDistance, 11);
+    this.cam.fovBase = 58 + (p.mounted ? clamp((p.chocoSpeed - 9) / 8, 0, 1) * 10 : 0) + this.cam.lockTilt * 10;
     this.director.update(real);
     this.cam.update(dt, input, controllable);
     this.ui.letterbox(this.director.letterbox);
+    const cine = this.director.active && this.director.seq?.name !== 'title';
+    this.hud.setVisible(this.combat.active && !cine);
+    if (cine) this.ui.hideHint();
 
     // Grass benders: chocobo feet/body and Cloud.
     const cp = p.chocoPos;
@@ -490,6 +593,11 @@ export class Game {
       // Keep the chocobo clear of the fight.
       this.player.chocoFleeFrom = m.position;
     }
+    if (this.state === 'explore' && this.monsterDefeated && this.boss.phase === 'dormant') {
+      const pp = p.position;
+      if (Math.hypot(pp.x - ARENA.x, pp.z - ARENA.z) < ARENA.radius - 6) this.startBossIntro();
+    }
+    if (this.state === 'boss' || this.state === 'bossIntro') this.player.chocoFleeFrom = V(ARENA.x, 0, ARENA.z);
     if (this.state === 'victory') {
       this.victoryT += real;
       if (this.victoryT > 1.6 && this.victoryT - real <= 1.6) {
@@ -498,6 +606,7 @@ export class Game {
         this.sfx('ui_levelup', {});
       }
       if (this.victoryT > 6.5) {
+        this.monsterDefeated = true;
         this.combat.active = false;
         this.player.combat = false;
         this.player.chocoFleeFrom = null;
@@ -511,6 +620,177 @@ export class Game {
       }
     }
     void dt;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Boss
+  // ---------------------------------------------------------------------------
+  startBossIntro(fast = false) {
+    this.setState('bossIntro');
+    const p = this.player;
+    if (p.mounted) {
+      p.dismount(undefined, true);
+    }
+    p.chocoFleeFrom = new THREE.Vector3(ARENA.x, 0, ARENA.z);
+    this.audio?.music.setState('silence', { fade: 1.5 });
+    this.sfx('boss_quake', {});
+    this.vfx.shake(0.6);
+    const b = this.boss;
+    const arena = V(ARENA.x, ARENA.height, ARENA.z);
+    const toLake = V(LAKE.x - ARENA.x, 0, LAKE.z - ARENA.z).normalize();
+    const side = V(toLake.z, 0, -toLake.x);
+    const lakeSpot = b.anchor.clone();
+    const dur = fast ? 0.2 : 11;
+    if (fast) {
+      b.awaken();
+      for (let i = 0; i < 200; i++) b.update(1 / 30);
+      this.beginBossFight();
+      return;
+    }
+    this.director.play({
+      name: 'bossIntro',
+      duration: dur,
+      letterbox: true,
+      blendIn: 0.8,
+      blendOut: 1.4,
+      shots: [
+        // The lake churns (from high on the colonnade, looking out over the water).
+        { start: 0, end: 3.2, fn: (u) => ({ pos: arena.clone().addScaledVector(toLake, 30).addScaledVector(side, -14).add(V(0, 9 + u, 0)), look: lakeSpot.clone().add(V(0, 1, 0)), fov: 46 - u * 6, dof: 0 }) },
+        // Eruption: low wide angle from the waterline steps.
+        { start: 3.2, end: 7.2, fn: (u) => ({ pos: arena.clone().addScaledVector(toLake, 40).addScaledVector(side, 14).add(V(0, 1.5 + u * 2, 0)), look: lakeSpot.clone().add(V(0, 4 + u * 12, 0)), fov: 56, dof: 0 }) },
+        // Face to face.
+        {
+          start: 7.2,
+          end: 11,
+          blend: 0.6,
+          fn: (u) => {
+            const h = b.actor.headCenter();
+            const pos = h.clone().addScaledVector(toLake, -16 + u * 3).addScaledVector(side, 5).setY(h.y - 3);
+            return { pos, look: h, fov: 40 - u * 5, dof: 0.7, focus: pos.distanceTo(h), range: 8, bokeh: 1.5 };
+          },
+        },
+      ],
+      events: [
+        { t: 0.3, fn: () => this.ui.showHint('The water is boiling…', 2.5) },
+        { t: 3.4, fn: () => { b.awaken(); this.sfx('boss_emerge', { position: lakeSpot }); this.waterColumn(lakeSpot.clone(), 1.6); this.vfx.shake(1.0); this.audio?.music.cue('boss_reveal'); } },
+        { t: 4.2, fn: () => this.vfx.splash(lakeSpot.clone().addScaledVector(toLake, 8), 4) },
+        { t: 7.6, fn: () => { this.sfx('boss_roar', { position: b.actor.headCenter() }); this.vfx.shake(0.8); this.vfx.radialBlur(1.0); this.vfx.aberration(1.0); } },
+        { t: 8.0, fn: () => { this.ui.showBanner('ELDER ZOLOM<small>Ancient Serpent of the Mere</small>', 'phase', 3); this.audio?.music.setState('boss', { immediate: true }); } },
+      ],
+      onUpdate: () => {
+        // Churning water before the eruption.
+        if (this.director.t < 3.4) {
+          for (let i = 0; i < 4; i++) this.vfx.p.spawn({ pos: lakeSpot.clone().add(V((Math.random() - 0.5) * 16, 0, (Math.random() - 0.5) * 16)), vel: V(0, 2 + Math.random() * 4, 0), life: 0.8, size: 0.25, sizeEnd: 0.8, color: [0.85, 0.9, 0.95], alpha: 0.4, type: PType.Smoke, drag: 2 });
+        }
+      },
+      onEnd: () => this.beginBossFight(),
+    });
+  }
+
+  /** Massive eruption of water: column, droplet rain, spray mist, ripples. */
+  private waterColumn(at: THREE.Vector3, power = 1) {
+    this.vfx.fx.pillar(at.clone().setY(LAKE.level - 1), new THREE.Color(0.55, 0.65, 0.7), 6 * power, 28 * power, 2.2, 0.8);
+    this.vfx.splash(at.clone(), 7 * power);
+    for (let i = 0; i < 260 * power; i++) {
+      const a = Math.random() * Math.PI * 2,
+        r = Math.random() * 5;
+      this.vfx.p.spawn({ pos: at.clone().add(V(Math.cos(a) * r, 1 + Math.random() * 6, Math.sin(a) * r)), vel: V(Math.cos(a) * (2 + Math.random() * 8), 10 + Math.random() * 22, Math.sin(a) * (2 + Math.random() * 8)), life: 2 + Math.random() * 1.5, size: 0.08 + Math.random() * 0.14, color: [0.85, 0.92, 1.0], type: PType.Mote, gravity: 16, drag: 0.3, emissive: 1.4 });
+    }
+    for (let i = 0; i < 40 * power; i++) this.vfx.p.spawn({ pos: at.clone().add(V((Math.random() - 0.5) * 10, Math.random() * 14, (Math.random() - 0.5) * 10)), vel: V((Math.random() - 0.5) * 4, 2 + Math.random() * 3, (Math.random() - 0.5) * 4), life: 3 + Math.random() * 2, size: 2, sizeEnd: 6, color: [0.9, 0.93, 0.96], alpha: 0.35, type: PType.Smoke, drag: 1 });
+    for (let k = 0; k < 3; k++) this.vfx.fx.shockwave(at.clone().setY(LAKE.level + 0.05), new THREE.Color(0.4, 0.5, 0.55), 18 + k * 8, 1.4 + k * 0.4);
+  }
+
+  private beginBossFight() {
+    this.setState('boss');
+    this.combat.targets = [this.boss];
+    this.combat.active = true;
+    this.combat.lockOn = true;
+    this.combat.lock = this.boss;
+    this.player.combat = true;
+    this.hud.setVisible(true);
+    if (this.player.cloud.swordAt !== 'hand') {
+      this.player.cloud.attachSword('hand');
+      this.player.cloud.armed = true;
+    }
+    this.player.cloud.setBase('combat');
+    this.audio?.music.setState('boss', { fade: 0.5 });
+    this.ui.showHint('Watch the <b style="color:#ff7a50">red markings</b> — dodge with <kbd>Space</kbd>. Its weakness: <b style="color:#ffe44a">Thunder</b>.', 6);
+  }
+
+  private bossEnrage() {
+    const b = this.boss;
+    this.vfx.slow(0.5, 1.5);
+    this.audio?.music.cue('enrage_hit');
+    this.sfx('boss_enrage', { position: b.actor.headCenter() });
+    this.stormTarget = 1;
+    this.combat.limitRate = 2.4;
+    const toLake = V(LAKE.x - ARENA.x, 0, LAKE.z - ARENA.z).normalize();
+    const side = V(toLake.z, 0, -toLake.x);
+    this.director.play({
+      name: 'enrage',
+      duration: 4.8,
+      letterbox: true,
+      blendIn: 0.4,
+      blendOut: 0.9,
+      shots: [
+        {
+          start: 0,
+          end: 4.8,
+          fn: (u) => {
+            const h = b.actor.headCenter();
+            const pos = h.clone().addScaledVector(toLake, -22 - u * 4).addScaledVector(side, -6).setY(ARENA.height + 1.5);
+            return { pos, look: h.clone().add(V(0, 2, 0)), fov: 46 + u * 6, roll: -0.06 * u };
+          },
+        },
+      ],
+      events: [
+        { t: 1.0, fn: () => { this.sfx('boss_roar', { position: b.actor.headCenter() }); this.vfx.shake(1.0); this.vfx.radialBlur(1.2); } },
+        { t: 1.3, fn: () => this.redLightning(b.actor.headCenter().add(V(0, 6, 0))) },
+        { t: 2.0, fn: () => this.ui.showBanner('PHASE II<small>The Serpent\'s Wrath</small>', 'phase', 2.8) },
+        { t: 2.4, fn: () => this.redLightning(V(ARENA.x + 10, ARENA.height, ARENA.z - 12)) },
+        { t: 3.4, fn: () => this.redLightning(V(ARENA.x - 14, ARENA.height, ARENA.z + 6)) },
+      ],
+    });
+  }
+
+  private redLightning(at: THREE.Vector3) {
+    const g = this.world.hf.height(at.x, at.z);
+    const to = at.y > g + 2 ? at : at.clone().setY(g);
+    this.vfx.fx.lightning(to.clone().add(V((Math.random() - 0.5) * 20, 90, (Math.random() - 0.5) * 20)), to, new THREE.Color(1.6, 0.35, 0.3), 0.35, 0.5);
+    this.vfx.flash(1.0, new THREE.Color(1.0, 0.5, 0.45));
+    this.vfx.exposure(0.6);
+    this.vfx.fx.lights.flash(to.clone().add(V(0, 5, 0)), new THREE.Color(1, 0.4, 0.3), 900, 90, 0.4);
+    this.sfx('thunder_strike', { position: to });
+  }
+
+  private bossFinale() {
+    this.ui.showHint('The Elder Zolom is faltering! Fill your <b style="color:#ff6db4">LIMIT</b> and press <kbd>R</kbd>', 6);
+    this.combat.limitRate = 5;
+  }
+
+  private updateWeather(real: number) {
+    this.storm = damp(this.storm, this.stormTarget, 0.5, real);
+    U.storm.value = this.storm;
+    if (Math.abs(this.storm - this.stormTarget) > 0.001 || this.storm > 0.001) {
+      this.world.applyPreset(lerpPreset(PRESET_DAY, PRESET_STORM, this.storm));
+      this.vfx.baseExposure = 1 + this.storm * 0.15;
+      U.windStrength.value = 0.55 + this.storm * 0.9;
+      if (Math.abs(this.storm - this.stormTarget) > 0.01) this.world.markEnvDirty();
+    }
+    if (this.storm > 0.3) {
+      this.vfx.rain(this.camera.position, this.storm, real);
+      this.lightningT -= real;
+      if (this.lightningT <= 0) {
+        this.lightningT = 2.5 + Math.random() * 4;
+        const a = Math.random() * Math.PI * 2;
+        const r = 60 + Math.random() * 140;
+        const at = V(this.camera.position.x + Math.cos(a) * r, 0, this.camera.position.z + Math.sin(a) * r);
+        at.y = this.world.hf.height(at.x, at.z);
+        this.vfx.fx.lightning(at.clone().add(V(0, 160, 0)), at, new THREE.Color(1.3, 0.6, 0.6), 0.3, 0.9);
+        this.vfx.flash(0.5, new THREE.Color(1, 0.7, 0.7));
+        this.sfx('thunder_distant', { position: at });
+      }
+    }
   }
 
   private driveAlongRoad(dt: number) {

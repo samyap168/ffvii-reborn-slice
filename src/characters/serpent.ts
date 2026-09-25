@@ -5,6 +5,7 @@ import * as THREE from 'three/webgpu';
 import {
   attribute,
   uv,
+  vec2,
   vec3,
   vec4,
   float,
@@ -33,7 +34,7 @@ import { U } from '../core/env';
 import { sstep } from '../core/tsl';
 
 const SEGS = 64;
-export const SERPENT_LENGTH = 52;
+export const SERPENT_LENGTH = 64;
 const RINGS_PER_SEG = 4;
 const RADIAL = 36;
 
@@ -41,9 +42,9 @@ const lin = (r: number, g: number, b: number): Vec3 => [Math.pow(r, 2.2), Math.p
 
 /** Body radius profile along u (0 = head end, 1 = tail tip). */
 export function serpentRadius(u: number) {
-  const neck = 1.25 + 0.6 * smoothstepJS(0, 0.12, u);
+  const neck = 1.45 + 0.55 * smoothstepJS(0, 0.1, u);
   const taper = 1 - smoothstepJS(0.35, 1.0, u) * 0.86;
-  return neck * taper * 1.15;
+  return neck * taper * 1.6;
 }
 function smoothstepJS(a: number, b: number, v: number) {
   const t = Math.max(0, Math.min(1, (v - a) / (b - a)));
@@ -88,7 +89,7 @@ function bodyGeometry() {
         b = a + 1,
         c = a + RADIAL + 1,
         d = c + 1;
-      idx.push(a, c, b, b, c, d);
+      idx.push(a, b, c, b, d, c);
     }
   // Tail cap + neck cap (neck hidden inside head).
   const g = new THREE.BufferGeometry();
@@ -103,7 +104,7 @@ function bodyGeometry() {
 }
 
 function bodyMaterial(veinColor: any, veinGlow: any, flash: any, dissolve: any) {
-  const m = new THREE.MeshPhysicalNodeMaterial();
+  const m = new THREE.MeshStandardNodeMaterial();
   const v = uv();
   const u = v.x.mul(SERPENT_LENGTH); // meters along body
   const around = v.y;
@@ -112,41 +113,39 @@ function bodyMaterial(veinColor: any, veinGlow: any, flash: any, dissolve: any) 
   // Scales: offset rows of rounded cells.
   const sx = u.mul(1.6);
   const sy = around.mul(44.0).add(fract(sx.floor().mul(0.5)).mul(1.0));
-  const cell = vec3(fract(sx), fract(sy), 0).sub(0.5);
+  const cell = vec2(fract(sx), fract(sy)).sub(0.5);
   const sd = cell.length();
   const scaleEdge = smoothstep(0.32, 0.5, sd);
   const n = mx_fractal_noise_float(vec3(u.mul(0.3), around.mul(6.0), 0), 3, 2.0, 0.5).mul(0.5).add(0.5);
-  const dark = vec3(0.025, 0.06, 0.055);
-  const mid = vec3(0.06, 0.14, 0.11);
+  const dark = vec3(0.005, 0.016, 0.014);
+  const mid = vec3(0.014, 0.05, 0.04);
   let col: any = mix(dark, mid, n.mul(0.7).add(top.mul(0.3)));
   // Banding pattern down the back.
   const band = smoothstep(0.55, 0.9, sin(u.mul(0.9).add(n.mul(2.0))).mul(0.5).add(0.5)).mul(smoothstep(0.6, 0.95, top));
-  col = mix(col, vec3(0.1, 0.09, 0.05), band.mul(0.6));
+  col = mix(col, vec3(0.04, 0.035, 0.015), band.mul(0.7));
   col = col.mul(mix(float(1.0), float(0.55), scaleEdge));
   // Belly plates.
   const plate = smoothstep(0.85, 0.98, fract(u.mul(0.9)));
-  const bellyCol = mix(vec3(0.42, 0.38, 0.28), vec3(0.18, 0.15, 0.1), plate);
+  const bellyCol = mix(vec3(0.16, 0.13, 0.08), vec3(0.05, 0.04, 0.025), plate);
   col = mix(col, bellyCol, belly);
   m.colorNode = col;
-  m.roughnessNode = mix(float(0.32), float(0.6), belly).add(scaleEdge.mul(0.2));
-  m.metalnessNode = float(0.15);
-  (m as any).clearcoatNode = float(0.6).mul(float(1).sub(belly));
-  (m as any).clearcoatRoughnessNode = float(0.25);
-  (m as any).iridescenceNode = float(0.35).mul(float(1).sub(belly));
+  m.roughnessNode = mix(float(0.62), float(0.8), belly).add(scaleEdge.mul(0.15));
+  m.metalnessNode = float(0.02);
+
   // Wet sheen near water line + normal bump per scale.
-  const bump = cell.xy.mul(float(1).sub(scaleEdge)).mul(0.9);
-  const nn = normalize(normalWorld.add(vec3(bump.x, bump.y, bump.x.negate()).mul(0.35)));
+  const bump = cell.mul(float(1).sub(scaleEdge)).mul(0.9);
+  const nn = normalize(normalWorld.add(vec3(bump.x, bump.y, bump.x.negate()).mul(0.25)));
   m.normalNode = normalize(cameraViewMatrix.mul(vec4(nn, 0)).xyz);
   // Veins: glowing cracks between scales (enrage makes them blaze).
-  const vein = smoothstep(0.46, 0.5, sd).mul(smoothstep(0.55, 0.85, mx_noise_float(vec3(u.mul(0.25), around.mul(3.0), U.time.mul(0.2))).mul(0.5).add(0.5)));
+  const vein = smoothstep(0.44, 0.49, sd).mul(smoothstep(0.62, 0.85, mx_noise_float(vec3(u.mul(0.25), around.mul(3.0), U.time.mul(0.2))).mul(0.5).add(0.5)));
   const pulse = sin(u.mul(0.6).sub(U.time.mul(3.0))).mul(0.3).add(0.7);
   const V = normalize(cameraPosition.sub(positionWorld));
   const rim = pow(float(1).sub(saturate(dot(normalWorld, V))), 3.0);
-  m.emissiveNode = (vec3(veinColor as any) as any).mul(vein.mul(pulse).mul(veinGlow).mul(3.0)).add(vec3(0.05, 0.15, 0.14).mul(rim).mul(U.sunIntensity.mul(0.3))).add(vec3(flash as any));
+  m.emissiveNode = (vec3(veinColor as any) as any).mul(vein.mul(pulse).mul(veinGlow).mul(2.0)).add(vec3(0.02, 0.06, 0.05).mul(rim).mul(U.sunIntensity.mul(0.3))).add(vec3(flash as any));
   // Dissolve for the finale.
   const dn = mx_noise_float(positionWorld.mul(0.35)).mul(0.5).add(0.5);
   m.alphaTestNode = float(0.5);
-  m.opacityNode = sstep(dissolve.add(0.02), dissolve, dn.mul(0.98).add(0.01));
+  m.opacityNode = smoothstep(dissolve, dissolve.add(0.02), dn.mul(0.98).add(0.01));
   return m;
 }
 
@@ -156,8 +155,8 @@ function bodyMaterial(veinColor: any, veinGlow: any, flash: any, dissolve: any) 
 const HEAD_MATS: Record<string, MaterialDef> = {
   scale: { color: lin(0.12, 0.26, 0.22), rough: 0.35, metal: 0.15, kind: 6 },
   scaleDark: { color: lin(0.06, 0.12, 0.11), rough: 0.4, metal: 0.1, kind: 6 },
-  belly: { color: lin(0.62, 0.56, 0.42), rough: 0.55, metal: 0, kind: 8 },
-  horn: { color: lin(0.6, 0.52, 0.4), rough: 0.45, metal: 0, kind: 8 },
+  belly: { color: lin(0.45, 0.4, 0.3), rough: 0.55, metal: 0, kind: 8 },
+  horn: { color: lin(0.34, 0.3, 0.25), rough: 0.45, metal: 0, kind: 8 },
   hornDark: { color: lin(0.2, 0.17, 0.14), rough: 0.4, metal: 0, kind: 8 },
   fang: { color: lin(0.92, 0.9, 0.82), rough: 0.25, metal: 0, kind: 8 },
   mouth: { color: lin(0.35, 0.05, 0.08), rough: 0.35, metal: 0, kind: 0 },
@@ -174,21 +173,21 @@ export const HEAD_BONES: BoneSpec[] = [
 function headPrims(): Prim[] {
   const P: Prim[] = [];
   // Skull.
-  P.push({ type: 'ellipsoid', c: [0, 0.2, 1.1], r: [1.3, 1.05, 1.9], mat: 'scale', bone: 'head', k: 0.3 });
-  P.push({ type: 'ellipsoid', c: [0, 0.05, 2.6], r: [0.95, 0.7, 1.4], mat: 'scale', bone: 'head', k: 0.4 }); // snout
+  P.push({ type: 'ellipsoid', c: [0, 0.2, 1.1], r: [1.15, 0.85, 2.0], mat: 'scale', bone: 'head', k: 0.3 });
+  P.push({ type: 'ellipsoid', c: [0, -0.02, 2.9], r: [0.78, 0.5, 1.7], mat: 'scale', bone: 'head', k: 0.4 }); // snout
   P.push({ type: 'ellipsoid', c: [0, -0.2, 0.2], r: [1.35, 1.1, 1.2], mat: 'scale', bone: 'head', k: 0.4 }); // neck blend
   // Brow ridges + eye bumps.
   for (const sx of [1, -1]) {
-    P.push({ type: 'capsule', a: [0.55 * sx, 0.95, 2.0], b: [1.0 * sx, 1.05, 0.6], ra: 0.3, rb: 0.38, mat: 'scaleDark', bone: 'head', k: 0.25 });
-    P.push({ type: 'sphere', op: 'sub', c: [0.95 * sx, 0.62, 1.85], r: 0.3, mat: 'scale', bone: 'head', k: 0.1 });
-    P.push({ type: 'sphere', op: 'sub', c: [1.12 * sx, 0.5, 1.2], r: 0.22, mat: 'scale', bone: 'head', k: 0.08 });
+    P.push({ type: 'capsule', a: [0.5 * sx, 0.8, 2.3], b: [1.0 * sx, 0.95, 0.7], ra: 0.32, rb: 0.42, mat: 'scaleDark', bone: 'head', k: 0.2 });
+    P.push({ type: 'sphere', op: 'sub', c: [0.92 * sx, 0.5, 1.9], r: 0.24, mat: 'scale', bone: 'head', k: 0.08 });
+    P.push({ type: 'sphere', op: 'sub', c: [1.06 * sx, 0.42, 1.3], r: 0.18, mat: 'scale', bone: 'head', k: 0.06 });
     // Horns sweeping back.
     P.push({ type: 'cone', a: [0.8 * sx, 1.2, 0.7], b: [1.6 * sx, 2.4, -2.4], ra: 0.42, rb: 0.05, bend: [0.3 * sx, 0.8, 0.2], mat: 'horn', bone: 'head', k: 0.15 });
     P.push({ type: 'cone', a: [1.1 * sx, 0.3, 0.3], b: [2.2 * sx, 0.6, -1.4], ra: 0.28, rb: 0.03, bend: [0.4 * sx, 0.3, 0], mat: 'hornDark', bone: 'head', k: 0.1 });
     // Cheek plates.
     P.push({ type: 'ellipsoid', c: [1.0 * sx, -0.35, 1.0], r: [0.4, 0.55, 0.9], rot: [0, 0.3 * sx, 0], mat: 'scaleDark', bone: 'head', k: 0.2 });
     // Nostrils.
-    P.push({ type: 'sphere', op: 'sub', c: [0.35 * sx, 0.45, 3.75], r: 0.13, mat: 'scale', bone: 'head', k: 0.06 });
+    P.push({ type: 'sphere', op: 'sub', c: [0.3 * sx, 0.3, 4.3], r: 0.12, mat: 'scale', bone: 'head', k: 0.06 });
     // Frill spines + membrane.
     for (let f = 0; f < 4; f++) {
       const ang = -0.3 + f * 0.42;
@@ -199,15 +198,15 @@ function headPrims(): Prim[] {
   // Crown horn.
   P.push({ type: 'cone', a: [0, 1.2, 0.9], b: [0, 2.6, -1.3], ra: 0.35, rb: 0.04, bend: [0, 0.6, 0.3], mat: 'horn', bone: 'head', k: 0.15 });
   // Upper jaw underside (mouth roof) and fangs.
-  P.push({ type: 'ellipsoid', op: 'sub', c: [0, -0.45, 2.3], r: [0.85, 0.28, 1.6], mat: 'mouth', bone: 'head', k: 0.1 });
+  P.push({ type: 'ellipsoid', op: 'sub', c: [0, -0.42, 2.6], r: [0.7, 0.24, 1.8], mat: 'mouth', bone: 'head', k: 0.1 });
   for (const sx of [1, -1]) {
-    P.push({ type: 'cone', a: [0.55 * sx, -0.35, 3.3], b: [0.5 * sx, -1.05, 3.4], ra: 0.11, rb: 0.01, mat: 'fang', bone: 'head', k: 0.04 });
-    P.push({ type: 'cone', a: [0.75 * sx, -0.35, 2.6], b: [0.72 * sx, -0.8, 2.6], ra: 0.08, rb: 0.01, mat: 'fang', bone: 'head', k: 0.03 });
+    P.push({ type: 'cone', a: [0.45 * sx, -0.3, 3.9], b: [0.42 * sx, -0.95, 4.0], ra: 0.1, rb: 0.01, mat: 'fang', bone: 'head', k: 0.04 });
+    for (let t = 0; t < 4; t++) P.push({ type: 'cone', a: [(0.6 - t * 0.02) * sx, -0.3, 3.4 - t * 0.35], b: [(0.58 - t * 0.02) * sx, -0.62, 3.4 - t * 0.35], ra: 0.06, rb: 0.008, mat: 'fang', bone: 'head', k: 0.02 });
   }
   // Lower jaw on its own bone.
-  P.push({ type: 'ellipsoid', c: [0, -0.75, 2.1], r: [0.95, 0.35, 1.6], mat: 'belly', bone: 'jaw', k: 0.15 });
-  P.push({ type: 'ellipsoid', op: 'sub', c: [0, -0.52, 2.2], r: [0.75, 0.2, 1.45], mat: 'mouth', bone: 'jaw', k: 0.08 });
-  for (const sx of [1, -1]) P.push({ type: 'cone', a: [0.55 * sx, -0.6, 3.2], b: [0.5 * sx, -0.1, 3.25], ra: 0.09, rb: 0.01, mat: 'fang', bone: 'jaw', k: 0.03 });
+  P.push({ type: 'ellipsoid', c: [0, -0.68, 2.5], r: [0.8, 0.3, 1.9], mat: 'belly', bone: 'jaw', k: 0.15 });
+  P.push({ type: 'ellipsoid', op: 'sub', c: [0, -0.48, 2.6], r: [0.62, 0.18, 1.7], mat: 'mouth', bone: 'jaw', k: 0.08 });
+  for (const sx of [1, -1]) P.push({ type: 'cone', a: [0.45 * sx, -0.55, 3.7], b: [0.42 * sx, -0.1, 3.75], ra: 0.08, rb: 0.01, mat: 'fang', bone: 'jaw', k: 0.03 });
   // Throat / belly plates under the head.
   P.push({ type: 'ellipsoid', c: [0, -0.8, 0.6], r: [1.0, 0.5, 1.1], mat: 'belly', bone: 'jaw', bone2: 'head', k: 0.3 });
   return P;
@@ -220,7 +219,7 @@ export class SerpentActor {
   readonly headRig: Rig;
   readonly headGroup = new THREE.Group();
   readonly veinColor = uniform(new THREE.Color(0.2, 0.9, 1.0));
-  readonly veinGlow = uniform(0.6);
+  readonly veinGlow = uniform(0.3);
   readonly flash = uniform(new THREE.Color(0, 0, 0));
   readonly dissolve = uniform(0);
   readonly eyeGlow = uniform(1.2);
@@ -264,8 +263,8 @@ export class SerpentActor {
     this.headGroup.add(this.headRig.root);
     this.headGroup.add(hm);
     for (const [x, y, z, r] of [
-      [0.98, 0.62, 1.82, 0.2],
-      [1.14, 0.5, 1.2, 0.15],
+      [0.9, 0.52, 1.84, 0.15],
+      [1.03, 0.44, 1.26, 0.11],
     ]) {
       for (const sx of [1, -1]) {
         const e = makeEye(r, new THREE.Color(1.0, 0.75, 0.2), { slit: true, irisSize: 1.2 });
@@ -275,6 +274,7 @@ export class SerpentActor {
         this.eyes.push(e);
       }
     }
+    this.headGroup.scale.setScalar(1.4);
     this.root.add(this.headGroup);
     this.curvePts = [0, 1, 2, 3, 4, 5, 6].map(() => new THREE.Vector3());
     this.curve = new THREE.CatmullRomCurve3(this.curvePts, false, 'centripetal');
@@ -304,9 +304,7 @@ export class SerpentActor {
       const b = this.bones[i];
       b.position.copy(p);
       b.quaternion.setFromRotationMatrix(m);
-      // Compensate bind offset (bind z = -s): local frame origin must map ring at z=-s to p.
-      tmpT.set(0, 0, s).applyQuaternion(b.quaternion);
-      b.position.add(tmpT);
+
       this.segPos[i].copy(p);
     }
     this.root.updateMatrixWorld(true);
@@ -323,6 +321,7 @@ export class SerpentActor {
     hb['frillL'].rotation.set(0, -0.3 + this.frill * 0.5, -0.2 * (1 - this.frill));
     hb['frillR'].rotation.set(0, 0.3 - this.frill * 0.5, 0.2 * (1 - this.frill));
     for (const e of this.eyes) ((e.material as any).emissiveIntensity = this.eyeGlow.value);
+    this.headGroup.updateMatrixWorld(true);
     const fl = this.flash.value;
     fl.multiplyScalar(Math.exp(-dt * 10));
     void len;
@@ -330,7 +329,7 @@ export class SerpentActor {
 
   /** World-space point of the mouth (for beams / bites). */
   mouth(out = new THREE.Vector3()) {
-    return out.set(0, -0.35, 3.6).applyMatrix4(this.headGroup.matrixWorld);
+    return out.set(0, -0.35, 4.1).applyMatrix4(this.headGroup.matrixWorld);
   }
   headCenter(out = new THREE.Vector3()) {
     return out.set(0, 0.3, 1.6).applyMatrix4(this.headGroup.matrixWorld);

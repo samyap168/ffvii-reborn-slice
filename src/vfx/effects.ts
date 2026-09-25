@@ -447,6 +447,43 @@ export class Effects {
     });
   }
 
+  /** Danger zone on the ground: pulsing ring that fills in until impact. */
+  telegraph(pos: THREE.Vector3, radius: number, life: number, color = new THREE.Color(1, 0.25, 0.1)) {
+    const m = additiveMat();
+    const k = uniform(0);
+    const c = uniform(color.clone());
+    const p = uv().sub(0.5).mul(2.0);
+    const r = length(p);
+    const edge = sstep(0.06, 0.0, abs(r.sub(0.94)));
+    const fill = float(1).sub(smoothstep(k, k.add(0.02), r)).mul(0.35);
+    const pulse = sin(U.time.mul(14.0)).mul(0.25).add(0.75);
+    const inside = sstep(1.0, 0.98, r);
+    const warn = saturate(edge.add(fill).add(sstep(0.02, 0.0, abs(r.sub(k))).mul(0.8))).mul(inside);
+    m.colorNode = vec4((vec3(c as any) as any).mul(warn).mul(pulse).mul(2.5), 1);
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), m);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.copy(pos).add(new THREE.Vector3(0, 0.12, 0));
+    mesh.scale.setScalar(radius);
+    this.add({ obj: mesh, age: 0, life, update: (t) => (k.value = t), dispose: () => (mesh.geometry.dispose(), m.dispose()) });
+  }
+
+  telegraphLine(from: THREE.Vector3, to: THREE.Vector3, width: number, life: number) {
+    const m = additiveMat();
+    const k = uniform(0);
+    const v = uv();
+    const edge = sstep(0.1, 0.0, abs(v.x.sub(0.5)).sub(0.4).abs());
+    const sweep = float(1).sub(smoothstep(k, k.add(0.03), v.y)).mul(0.3);
+    const pulse = sin(U.time.mul(14.0)).mul(0.25).add(0.75);
+    m.colorNode = vec4(vec3(1.0, 0.25, 0.1).mul(saturate(edge.add(sweep))).mul(pulse).mul(2.5), 1);
+    const len = from.distanceTo(to);
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, len), m);
+    mesh.position.copy(from).lerp(to, 0.5).add(new THREE.Vector3(0, 0.15, 0));
+    mesh.rotation.set(-Math.PI / 2, 0, -Math.atan2(to.x - from.x, to.z - from.z) + Math.PI, 'YXZ');
+    mesh.rotation.order = 'YXZ';
+    mesh.rotation.set(-Math.PI / 2, Math.atan2(to.x - from.x, to.z - from.z), 0);
+    this.add({ obj: mesh, age: 0, life, update: (t) => (k.value = t), dispose: () => (mesh.geometry.dispose(), m.dispose()) });
+  }
+
   flashLight(pos: THREE.Vector3, color: THREE.Color, intensity: number, distance: number, life: number) {
     this.lights.flash(pos, color, intensity, distance, life);
   }
