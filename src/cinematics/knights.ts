@@ -321,6 +321,24 @@ function knightMaterial(def: KnightDef, dissolve: any, energy: any) {
   return m;
 }
 
+/** Gilded trim: the knight's metal pulled toward gold, polished, with a faint inner glow. */
+function trimMaterial(def: KnightDef, dissolve: any, energy: any) {
+  const m = new THREE.MeshPhysicalNodeMaterial({ side: THREE.DoubleSide });
+  const [r, g, b] = def.metal;
+  const gold = def.tier === 'king' ? [1.0, 0.78, 0.38] : [0.95, 0.74, 0.4];
+  m.colorNode = vec3(r * 0.35 + gold[0] * 0.65, g * 0.35 + gold[1] * 0.65, b * 0.35 + gold[2] * 0.65).mul(0.8);
+  m.metalnessNode = float(1);
+  m.roughnessNode = float(0.2);
+  const V = normalize(cameraPosition.sub(positionWorld));
+  const fres = pow(float(1).sub(saturate(abs(dot(normalWorld, V)))), 3.0);
+  const [gr, gg, gb] = def.glow;
+  m.emissiveNode = vec3(gr, gg, gb).mul(fres.mul(1.6).add(0.04)).mul(energy);
+  const n = mx_fractal_noise_float(positionLocal.mul(4.0), 3, 2.0, 0.5).mul(0.5).add(0.5);
+  m.alphaTest = 0.5;
+  m.opacityNode = saturate(n.sub(dissolve).mul(30.0).add(0.5));
+  return m;
+}
+
 function glowMaterial(def: KnightDef, energy: any, dissolve: any) {
   const m = new THREE.MeshBasicNodeMaterial();
   const [gr, gg, gb] = def.glow;
@@ -390,10 +408,11 @@ export class KnightActor {
     const b = this.rig.bones;
     const mat = knightMaterial(def, this.dissolve, this.energy);
     const gmat = glowMaterial(def, this.energy, this.dissolve);
+    const tmat = trimMaterial(def, this.dissolve, this.energy);
     const k = def.bulk,
       pd = def.pauldron;
     const bw = this.rig.bindWorld;
-    const attach = (bone: string, metal: THREE.BufferGeometry[], glow: THREE.BufferGeometry[] = []) => {
+    const attach = (bone: string, metal: THREE.BufferGeometry[], glow: THREE.BufferGeometry[] = [], trim: THREE.BufferGeometry[] = []) => {
       const off = bw[bone];
       const group = new THREE.Group();
       group.position.set(-off.x, -off.y, -off.z);
@@ -403,47 +422,97 @@ export class KnightActor {
         group.add(mm);
       }
       if (glow.length) group.add(new THREE.Mesh(merge(glow), gmat));
+      if (trim.length) {
+        const tm = new THREE.Mesh(merge(trim), tmat);
+        tm.castShadow = true;
+        group.add(tm);
+      }
       b[bone].add(group);
     };
     // Torso: cuirass, plackart, gorget, back plate.
-    attach('chest', [
-      at(G.sph(0.22, 24, 16), 0, 1.36, 0.0, 0, 0, 0, 1.15 * k, 1.05, 0.8 * k),
-      at(G.cyl(0.22 * k, 0.17 * k, 0.24, 20), 0, 1.2, 0.0, 0, 0, 0, 1, 1, 0.78),
-      at(G.torus(0.13, 0.035), 0, 1.54, 0, Math.PI / 2, 0, 0),
-      at(G.box(0.05, 0.2, 0.02), 0, 1.32, 0.19),
-    ], [at(G.box(0.03, 0.26, 0.01), 0, 1.32, 0.205), at(G.torus(0.12, 0.012), 0, 1.4, 0.02, 0, 0, 0)]);
+    const lames: THREE.BufferGeometry[] = [];
+    for (let i = 0; i < 3; i++) lames.push(at(G.cyl((0.2 - i * 0.012) * k, (0.19 - i * 0.012) * k, 0.07, 22), 0, 1.25 - i * 0.065, 0.0, 0.06, 0, 0, 1, 1, 0.8));
+    attach(
+      'chest',
+      [
+        at(G.sph(0.22, 24, 16), 0, 1.37, 0.0, 0, 0, 0, 1.2 * k, 1.05, 0.82 * k),
+        ...lames,
+        at(G.cyl(0.16, 0.2, 0.1, 20), 0, 1.53, 0), // gorget
+      ],
+      [at(G.box(0.02, 0.2, 0.01), 0, 1.37, 0.205 * k), at(G.torus(0.12, 0.012), 0, 1.4, 0.02, 0, 0, 0)],
+      [
+        at(G.box(0.024, 0.3, 0.03), 0, 1.36, 0.176 * k, -0.05, 0, 0), // ridge trim
+        at(G.torus(0.17, 0.018), 0, 1.575, 0, Math.PI / 2, 0, 0), // gorget rim
+        at(G.torus(0.2 * k, 0.014), 0, 1.285, 0, Math.PI / 2, 0, 0, 1, 0.8, 1),
+      ],
+    );
     // Fauld + tassets on the hips.
     const tassets: THREE.BufferGeometry[] = [at(G.cyl(0.17 * k, 0.21 * k, 0.16, 20), 0, 1.02, 0, 0, 0, 0, 1, 1, 0.8)];
     for (let i = 0; i < 4; i++) tassets.push(at(G.box(0.14 * k, 0.26, 0.03), (i - 1.5) * 0.12 * k, 0.86, 0.16 * k * 0.8, -0.15, 0, 0));
-    attach('hips', tassets, [at(G.box(0.3 * k, 0.012, 0.012), 0, 1.1, 0.165 * k)]);
+    attach('hips', tassets, [at(G.box(0.3 * k, 0.012, 0.012), 0, 1.1, 0.165 * k)], [
+      at(G.torus(0.19 * k, 0.022), 0, 1.09, 0, Math.PI / 2, 0, 0, 1, 0.8, 1),
+      at(G.box(0.1, 0.08, 0.04), 0, 1.09, 0.165 * k), // buckle
+    ]);
+    if (def.cape) {
+      // Front tabard hanging from the belt.
+      const tg = new THREE.PlaneGeometry(0.2 * k, 0.62, 3, 8);
+      tg.translate(0, -0.31, 0);
+      const tuv = tg.attributes.uv as THREE.BufferAttribute;
+      for (let i = 0; i < tuv.count; i++) tuv.setY(i, (1 - tuv.getY(i)) * 0.45);
+      const tab = new THREE.Mesh(tg, capeMaterial(def.cape, this.dissolve, this.energy, def.glow));
+      tab.position.set(0, 1.07 - bw['hips'].y, 0.19 * k);
+      tab.rotation.x = -0.08;
+      b['hips'].add(tab);
+    }
     // Head.
     const h = helmGeo(def.helm);
-    attach('head', h.metal, h.glow);
+    const hy = 1.74;
+    const face = def.helm === 'hood' ? [] : [
+      at(G.sph(0.125, 18, 10, Math.PI, Math.PI * 0.5), 0, hy - 0.05, 0.02, Math.PI * 0.62, -Math.PI / 2, 0, 1.05, 1, 1.1), // bevor
+    ];
+    attach('head', [...h.metal, ...face], h.glow, [
+      at(G.torus(0.142, 0.012), 0, hy + 0.035, 0, Math.PI / 2, 0, 0, 1, 1.08, 1),
+    ]);
     // Arms.
     for (const s of ['L', 'R']) {
       const sx = s === 'L' ? 1 : -1;
       const shoulder = bw['uarm.' + s];
-      attach('uarm.' + s, [
-        at(G.sph(0.15 * pd, 18, 12, Math.PI * 2, Math.PI * 0.6), shoulder.x + 0.03 * sx, shoulder.y + 0.02, 0, 0, 0, -0.5 * sx, 1.2, 0.9, 1.1),
-        at(G.sph(0.13 * pd, 18, 12, Math.PI * 2, Math.PI * 0.6), shoulder.x + 0.06 * sx, shoulder.y - 0.06, 0, 0, 0, -0.7 * sx, 1.1, 0.8, 1.0),
-        at(G.cyl(0.065, 0.06, 0.26), shoulder.x + 0.02 * sx, 1.36, 0),
-      ]);
+      const lamesP: THREE.BufferGeometry[] = [];
+      const rims: THREE.BufferGeometry[] = [];
+      for (let i = 0; i < 3; i++) {
+        const r = (0.155 - i * 0.012) * pd;
+        const x = shoulder.x + (0.03 + i * 0.03) * sx,
+          y = shoulder.y + 0.03 - i * 0.055;
+        lamesP.push(at(G.sph(r, 20, 10, Math.PI * 2, Math.PI * 0.42), x, y, 0, 0, 0, -(0.45 + i * 0.18) * sx, 1.25, 0.62, 1.12));
+        // Rim along the cap's open edge, built in the cap's local frame.
+        const th = Math.PI * 0.42;
+        const rim = G.torus(r * Math.sin(th), 0.012).rotateX(Math.PI / 2).translate(0, r * Math.cos(th), 0);
+        rims.push(at(rim, x, y, 0, 0, 0, -(0.45 + i * 0.18) * sx, 1.25, 0.62, 1.12));
+      }
+      attach('uarm.' + s, [...lamesP, at(G.cyl(0.085, 0.078, 0.26), shoulder.x + 0.02 * sx, 1.36, 0)], [], rims);
       const elbow = bw['farm.' + s];
-      attach('farm.' + s, [at(G.sph(0.07), elbow.x, elbow.y, 0), at(G.cyl(0.06, 0.055, 0.24), elbow.x + 0.01 * sx, 1.08, 0), at(G.cone(0.03, 0.12), elbow.x, elbow.y, -0.07, -Math.PI / 2, 0, 0)]);
+      attach(
+        'farm.' + s,
+        [at(G.sph(0.085), elbow.x, elbow.y, 0), at(G.cyl(0.098, 0.07, 0.24), elbow.x + 0.01 * sx, 1.08, 0), at(G.cone(0.035, 0.13), elbow.x, elbow.y, -0.08, -Math.PI / 2, 0, 0)],
+        [],
+        [at(G.torus(0.096, 0.012), elbow.x + 0.01 * sx, 0.965, 0, Math.PI / 2, 0, 0)],
+      );
       const hand = bw['hand.' + s];
       attach('hand.' + s, [at(G.box(0.1, 0.12, 0.1), hand.x, hand.y - 0.05, 0.01), at(G.cyl(0.075, 0.06, 0.1), hand.x, hand.y + 0.03, 0)]);
       // Legs.
       const hipB = bw['thigh.' + s],
         knee = bw['shin.' + s],
         ankle = bw['foot.' + s];
-      attach('thigh.' + s, [at(G.cyl(0.11 * k, 0.09 * k, 0.4), hipB.x, 0.76, 0)]);
-      attach('shin.' + s, [at(G.sph(0.08), knee.x, knee.y, 0.02, 0, 0, 0, 1, 1, 1.2), at(G.cyl(0.09 * k, 0.07 * k, 0.42), knee.x, 0.32, 0), at(G.cone(0.03, 0.14), knee.x, knee.y, 0.1, Math.PI / 2, 0, 0)]);
+      attach('thigh.' + s, [at(G.cyl(0.13 * k, 0.1 * k, 0.4), hipB.x, 0.76, 0)]);
+      attach('shin.' + s, [at(G.sph(0.095), knee.x, knee.y, 0.02, 0, 0, 0, 1, 1, 1.2), at(G.cyl(0.105 * k, 0.08 * k, 0.42), knee.x, 0.32, 0), at(G.cone(0.035, 0.15), knee.x, knee.y, 0.11, Math.PI / 2, 0, 0)], [], [at(G.torus(0.1 * k, 0.012), knee.x, 0.5, 0, Math.PI / 2, 0, 0), at(G.box(0.025, 0.38, 0.03), knee.x, 0.32, 0.1 * k)]);
       attach('foot.' + s, [at(G.box(0.12, 0.08, 0.28), ankle.x, 0.04, 0.05), at(G.cone(0.06, 0.12, 4), ankle.x, 0.04, 0.23, Math.PI / 2, 0, 0)]);
     }
     // Cape.
     if (def.cape) {
-      const cg = new THREE.PlaneGeometry(0.62 * k, 1.35, 8, 16);
-      cg.translate(0, -0.675, 0);
+      const cg = new THREE.PlaneGeometry(0.62 * k, 1.6, 8, 18);
+      cg.translate(0, -0.8, 0);
+      const cp = cg.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < cp.count; i++) cp.setX(i, cp.getX(i) * (1 + (-cp.getY(i) / 1.6) * 0.55));
       // uv.y increases downward for the ripple amount.
       const uvs = cg.attributes.uv as THREE.BufferAttribute;
       for (let i = 0; i < uvs.count; i++) uvs.setY(i, 1 - uvs.getY(i));
