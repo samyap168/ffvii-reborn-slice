@@ -112,7 +112,7 @@ export class HUD {
       .num.heal { color:#7dffae; }
       .num.miss { color:#cfd8ff; font-size:26px; font-style:italic; }
       .num.player { color:#ff8a8a; font-size:26px; }
-      .num.tag { color:#ffcf6a; font-size:20px; letter-spacing:.2em; }
+      .num.tag { color:#ffcf6a; font-size:20px; letter-spacing:.2em; transform:translate(-50%,-50%) translateY(-38px); }
       </style>
       <div class="hud" id="hudRoot">
         <div class="numlayer" id="numLayer"></div>
