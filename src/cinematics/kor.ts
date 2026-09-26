@@ -738,7 +738,7 @@ export class KnightsOfRound {
     const knightP = (i: number) => this.knights[i].chest();
     const sample = (pos: THREE.Vector3, look: THREE.Vector3, fov: number, extra: Partial<ShotSample> = {}): ShotSample => ({ pos, look, fov, ...extra });
     const heroShots = (i: number, t0: number, low: THREE.Vector3): Shot[] => [
-      { start: t0, end: t0 + 1.5, fn: (u) => sample(head().add(V(0, -6, 0)).addScaledVector(L, 30).addScaledVector(S, 22 - u * 4).setY(ARENA.height + 3), head().lerp(knightP(i), 0.3 + u * 0.4), 66 - u * 10) },
+      { start: t0, end: t0 + 1.5, fn: (u) => sample(head().add(V(0, -6, 0)).addScaledVector(L, 30).addScaledVector(S, 22 - u * 4).setY(ARENA.height + 3), head().lerp(knightP(i).setY(Math.min(knightP(i).y, head().y + 30)), 0.3 + u * 0.4), 66 - u * 10) },
       { start: t0 + 1.5, end: t0 + 3.3, fn: (u) => sample(low.clone().addScaledVector(L, -6).addScaledVector(S, 10 - u * 3).setY(ARENA.height + 1.2), knightP(i).lerp(head(), 0.4 + u * 0.3), 48 + u * 8, { dof: 0.5, focus: 18, range: 30 }) },
       { start: t0 + 3.3, end: t0 + T.heroDur, fn: (u) => sample(A.clone().addScaledVector(S, -50 - u * 10).addScaledVector(L, 5).setY(ARENA.height + 18 + u * 6), head(), 52) },
     ];
