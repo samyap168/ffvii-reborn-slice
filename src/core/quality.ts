@@ -19,9 +19,11 @@ export interface QualitySettings {
   msaa: number;
   particleBudget: number;
   featherShells: number;
+  /** Scale render resolution to hold the frame rate. */
+  adaptive: boolean;
 }
 
-const PRESETS: Record<QualityLevel, QualitySettings> = {
+const PRESETS: Record<QualityLevel, Omit<QualitySettings, 'adaptive'>> = {
   low: {
     level: 'low',
     pixelRatio: 0.75,
@@ -67,18 +69,18 @@ const PRESETS: Record<QualityLevel, QualitySettings> = {
     pixelRatio: 1,
     terrainN: 64,
     terrainRings: 7,
-    grassDensity: 34,
-    grassRadius: 64,
+    grassDensity: 26,
+    grassRadius: 60,
     treeCount: 3600,
     shadowMapSize: 2048,
     shadowCascades: 3,
     shadowFar: 300,
     bloom: true,
     dof: true,
-    motionBlur: true,
+    motionBlur: false,
     ao: false,
     shafts: true,
-    msaa: 4,
+    msaa: 0,
     particleBudget: 14000,
     featherShells: 14,
   },
@@ -95,7 +97,7 @@ const PRESETS: Record<QualityLevel, QualitySettings> = {
     shadowFar: 400,
     bloom: true,
     dof: true,
-    motionBlur: true,
+    motionBlur: false,
     ao: true,
     shafts: true,
     msaa: 4,
@@ -108,9 +110,13 @@ export function getQuality(): QualitySettings {
   const params = new URLSearchParams(location.search);
   let level = (params.get('q') as QualityLevel) || (localStorageGet('ffvii.quality') as QualityLevel) || 'high';
   if (!PRESETS[level]) level = 'high';
-  const q = { ...PRESETS[level] };
-  q.pixelRatio = Math.min(q.pixelRatio * window.devicePixelRatio, level === 'ultra' ? 2 : 1.5);
+  const q = { ...PRESETS[level], adaptive: true } as QualitySettings;
+  // Render at CSS resolution (FXAA smooths edges); only Ultra supersamples on HiDPI screens.
+  if (level === 'ultra') q.pixelRatio = Math.min(q.pixelRatio * window.devicePixelRatio, 2);
   if (params.has('pr')) q.pixelRatio = parseFloat(params.get('pr')!);
+  if (params.has('pr') || params.has('noadapt')) q.adaptive = false;
+  // Motion blur is opt-in: ?mb=1
+  if (params.get('mb') === '1') q.motionBlur = true;
   return q;
 }
 

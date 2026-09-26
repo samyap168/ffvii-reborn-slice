@@ -20,6 +20,7 @@ import {
   dot,
   length,
   max,
+  min,
   pow,
   renderOutput,
   convertToTexture,
@@ -78,7 +79,10 @@ export class PostFX {
 
     let color: any = sceneColor;
     if (q.motionBlur) {
-      const vel = scenePass.getTextureNode('velocity').mul(this.mbStrength);
+      // Clamp the blur length so a slow frame can't smear objects into discrete copies.
+      const v = scenePass.getTextureNode('velocity').xy.mul(this.mbStrength);
+      const vl = length(v);
+      const vel = v.mul(min(float(1), float(0.012).div(max(vl, float(1e-5)))));
       color = motionBlur(sceneColor, vel, int(10));
     }
 

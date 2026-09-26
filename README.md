@@ -50,8 +50,9 @@ that notices you, dismount into combat, then ride on to the lakeside ruins where
 the **Elder Zolom** rises. Break it into Phase II, fill your Limit and summon the
 **Knights of Round**.
 
-Debug URL parameters: `?q=low|medium|high|ultra`, `?pr=0.75` (pixel-ratio
-scale), `?gl` (force WebGL2), `?skip=explore|boss|enrage|kor` (jump ahead),
+Debug URL parameters: `?q=low|medium|high|ultra`, `?fps` (frame-rate readout),
+`?pr=0.75` (fixed pixel ratio; disables adaptive resolution), `?noadapt`,
+`?mb=1` (motion blur), `?gl` (force WebGL2), `?skip=explore|boss|enrage|kor` (jump ahead),
 `?view=cloud|choco|monster|serpent|knights` (model viewer).
 
 ## Tech
