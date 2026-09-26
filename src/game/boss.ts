@@ -132,7 +132,7 @@ export class ElderZolom implements Target {
         this.hooks.onStagger();
       }
     }
-    this.actor.flash.value.setRGB(0.9, 0.8, 0.7);
+    this.actor.flash.value.setRGB(0.22, 0.2, 0.18);
     this.hooks.sfx(h.heavy ? 'hit_critical' : 'hit_armor', h.point, { intensity: h.heavy ? 1 : 0.7 });
     // Phase checks.
     if (this.phase === 'p1' && this.hp <= this.maxHp * 0.55) this.beginEnrage();

@@ -84,7 +84,7 @@ export class VFX {
   update(dt: number, realDt: number) {
     this.tickers = this.tickers.filter((f) => f(dt));
     this.p.update(dt);
-    this.fx.update(dt);
+    this.fx.update(dt, realDt);
     this.trail.update(dt);
     const k = Math.exp(-realDt * 7);
     this.flashAmt *= Math.exp(-realDt * 9);

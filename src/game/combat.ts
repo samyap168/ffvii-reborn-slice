@@ -326,6 +326,11 @@ export class PlayerCombat {
     this.vfx.hitStop(crit ? 0.14 : this.swingHeavy ? 0.1 : 0.055);
     this.vfx.shake(crit ? 0.5 : this.swingHeavy ? 0.42 : 0.22);
     if (crit) this.vfx.flash(0.35, new THREE.Color(1, 0.9, 0.7));
+    this.vfx.fx.slashArc(point, dir, this.cam.camera.position, crit ? new THREE.Color(1.0, 0.75, 0.35) : new THREE.Color(0.75, 0.9, 1.0), this.swingHeavy ? 2.6 : crit ? 2.2 : 1.6, this.swingHeavy ? 0.3 : 0.2);
+    if (crit || this.swingHeavy) {
+      this.vfx.aberration(crit ? 0.7 : 0.45);
+      this.vfx.radialBlur(crit ? 0.5 : 0.35);
+    }
     this.cam.fovKick = crit ? -4 : -1.5;
     this.sfx.play(crit ? 'hit_critical' : 'hit_flesh', { position: point, intensity: power });
     this.hud.number(point, String(res.damage), crit ? 'crit' : '');

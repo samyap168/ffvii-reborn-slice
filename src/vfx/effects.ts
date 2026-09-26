@@ -135,12 +135,15 @@ interface Transient {
   life: number;
   update: (t: number, dt: number) => void;
   dispose?: () => void;
+  /** Advance on real time (ignores hit-stop / slow-mo). */
+  real?: boolean;
 }
 
 const ringGeo = new THREE.RingGeometry(0.85, 1.0, 96, 1).rotateX(-Math.PI / 2);
 const discGeo = new THREE.CircleGeometry(1, 96).rotateX(-Math.PI / 2);
 const sphereGeo = new THREE.SphereGeometry(1, 48, 24);
 const cylGeo = new THREE.CylinderGeometry(1, 1, 1, 32, 1, true).translate(0, 0.5, 0);
+const slashGeo = new THREE.PlaneGeometry(1, 1);
 
 export class Effects {
   readonly group = new THREE.Group();
@@ -157,10 +160,11 @@ export class Effects {
     t.update(0, 0);
   }
 
-  update(dt: number) {
+  update(dt: number, realDt = dt) {
     for (const t of this.list) {
-      t.age += dt;
-      t.update(Math.min(1, t.age / t.life), dt);
+      const d = t.real ? realDt : dt;
+      t.age += d;
+      t.update(Math.min(1, t.age / t.life), d);
     }
     const dead = this.list.filter((t) => t.age >= t.life);
     for (const d of dead) {
@@ -169,6 +173,40 @@ export class Effects {
     }
     this.list = this.list.filter((t) => t.age < t.life);
     this.lights.update(dt);
+  }
+
+  /** A bright crescent cut drawn across the impact point along the swing, facing the camera. */
+  slashArc(pos: THREE.Vector3, dir: THREE.Vector3, camPos: THREE.Vector3, color: THREE.Color, size: number, life = 0.22) {
+    const m = additiveMat();
+    const k = uniform(0);
+    const c = uniform(color.clone());
+    const p = uv().sub(0.5).mul(2.0);
+    // Arc of a circle centred below the quad; thickest mid-sweep, tapering at both tips.
+    const d = length(p.sub(vec2(0, -1.25))).sub(1.35);
+    const along = p.x.mul(0.5).add(0.5);
+    const taper = sstep(0.0, 0.5, along).mul(sstep(1.0, 0.5, along));
+    const w = taper.mul(0.3).add(0.015);
+    const core = exp(abs(d).div(w).mul(-1.6));
+    // Sweep in fast, then burn off from the tail.
+    const head = smoothstep(0.0, 0.35, k).mul(1.25);
+    const tail = smoothstep(0.3, 1.0, k).mul(1.1);
+    const vis = float(1).sub(smoothstep(head.sub(0.12), head, along)).mul(smoothstep(tail.sub(0.1), tail, along));
+    const hot = vec3(1, 1, 1).mul(exp(abs(d).div(w).mul(-8.0)).mul(0.8));
+    m.colorNode = vec4(vec3(c as any).mul(core).add(hot).mul(vis).mul(3.5), 1);
+    // Impact points sit inside the target's hit volume: draw on top.
+    m.depthTest = false;
+    const mesh = new THREE.Mesh(slashGeo, m);
+    const toCam = camPos.clone().sub(pos).normalize();
+    const x = dir.clone().addScaledVector(toCam, -dir.dot(toCam));
+    if (x.lengthSq() < 1e-6) x.set(1, 0, 0);
+    x.normalize();
+    const y = new THREE.Vector3().crossVectors(toCam, x).normalize();
+    mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, toCam));
+    mesh.position.copy(pos).addScaledVector(toCam, 0.3);
+    const sz = Math.max(size, camPos.distanceTo(pos) * 0.075);
+    mesh.scale.set(sz * 2.2, sz, 1);
+    mesh.renderOrder = 6;
+    this.add({ obj: mesh, age: 0, life, real: true, update: (t) => (k.value = t), dispose: () => m.dispose() });
   }
 
   /** Expanding ground shockwave ring. */
