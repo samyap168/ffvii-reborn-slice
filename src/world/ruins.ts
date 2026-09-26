@@ -20,8 +20,14 @@ import {
   fract,
   attribute,
   uniform,
+  uv,
+  atan,
+  length,
+  positionLocal,
+  pow,
 } from 'three/tsl';
 import { RNG, Simplex } from '../core/math';
+import { sstep } from '../core/tsl';
 import { U } from '../core/env';
 import { ARENA, RUIN_SITES, LAKE } from './layout';
 import type { Heightfield } from './heightfield';
@@ -164,6 +170,7 @@ export class Ruins {
     const A = ARENA;
     const baseY = A.height;
 
+    const standing: { x: number; z: number; h: number; a: number }[] = [];
     // Outer colonnade.
     const nCols = 18;
     for (let i = 0; i < nCols; i++) {
@@ -181,6 +188,7 @@ export class Ruins {
       for (const g of parts) stone.push(place(g, x, baseY - 0.2, z, rng.range(0, 6.28)));
       this.colliders.push({ x, z, r: 1.4 });
       this.columnTops.push(new THREE.Vector3(x, baseY + (broken ? 5 : h + 1), z));
+      if (!broken) standing.push({ x, z, h, a });
       // Fallen drums next to broken columns.
       if (broken && rng.next() < 0.7) {
         const drums = rng.int(1, 3);
@@ -257,6 +265,7 @@ export class Ruins {
       stone.push(place(b, x, this.hf.height(x, z) + s * 0.2, z, rng.range(0, 6.28), rng.range(-0.3, 0.3), rng.range(-0.3, 0.3)));
     }
 
+    this.buildBraziers(stone, rng);
     this.buildBridge(stone, glyphStone, rng);
 
     // Scattered ruin sites across the world.
@@ -281,6 +290,149 @@ export class Ruins {
     this.crystalLight = new THREE.PointLight(0x66ffaa, 40, 22, 2);
     this.crystalLight.position.copy(this.crystal.position);
     this.group.add(this.crystalLight);
+
+    this.buildBanners(standing, rng);
+    this.buildFloorRunes();
+  }
+
+  // --- Arena dressing -------------------------------------------------------------
+  private brazierSpots: THREE.Vector3[] = [];
+
+  /** Stone fire bowls on pedestals between the obelisk ring and the colonnade. */
+  private buildBraziers(stone: THREE.BufferGeometry[], rng: RNG) {
+    const A = ARENA;
+    const toLake = Math.atan2(LAKE.z - A.z, LAKE.x - A.x);
+    for (let i = 0; i < 8; i++) {
+      const a = toLake + Math.PI / 8 + (i / 8) * Math.PI * 2;
+      const da = Math.atan2(Math.sin(a - toLake), Math.cos(a - toLake));
+      if (Math.abs(da) < 0.6) continue;
+      const x = A.x + Math.cos(a) * 31,
+        z = A.z + Math.sin(a) * 31;
+      const ped = new THREE.CylinderGeometry(0.34, 0.5, 1.3, 12, 1).toNonIndexed();
+      weather(ped, 0.03, i * 7);
+      stone.push(place(ped, x, A.height + 0.65, z, rng.range(0, 6)));
+      const bowl = new THREE.CylinderGeometry(0.95, 0.45, 0.55, 16, 1).toNonIndexed();
+      weather(bowl, 0.04, i * 11);
+      stone.push(place(bowl, x, A.height + 1.55, z));
+      this.colliders.push({ x, z, r: 1.0 });
+      this.brazierSpots.push(new THREE.Vector3(x, A.height + 1.8, z));
+    }
+  }
+
+  /** Glowing coals + animated flame cards in the braziers (emissive, no lights). */
+  private buildFires() {
+    const coals: THREE.BufferGeometry[] = [];
+    const flames: THREE.BufferGeometry[] = [];
+    for (const p of this.brazierSpots) {
+      const c = new THREE.SphereGeometry(0.8, 14, 6).toNonIndexed();
+      c.scale(1, 0.22, 1);
+      c.translate(p.x, p.y - 0.02, p.z);
+      coals.push(stripAttrs(c));
+      for (let k = 0; k < 3; k++) {
+        const f = new THREE.PlaneGeometry(1.3, 2.4, 1, 1);
+        f.translate(0, 1.15, 0);
+        f.rotateY((k / 3) * Math.PI);
+        f.translate(p.x, p.y, p.z);
+        flames.push(f.toNonIndexed());
+      }
+    }
+    if (!coals.length) return;
+    const flick = sin(U.time.mul(9.0).add(positionWorld.x)).mul(0.15).add(sin(U.time.mul(23.0).add(positionWorld.z)).mul(0.08)).add(1.0);
+    const cm = new THREE.MeshStandardNodeMaterial();
+    const cn = mx_noise_float(positionWorld.mul(6.0).add(vec3(0, U.time.mul(0.5), 0))).mul(0.5).add(0.5);
+    cm.colorNode = vec3(0.05, 0.03, 0.02);
+    cm.roughnessNode = float(0.9);
+    cm.emissiveNode = mix(vec3(0.6, 0.1, 0.02), vec3(2.6, 0.9, 0.2), smoothstep(0.45, 0.85, cn)).mul(flick);
+    this.group.add(new THREE.Mesh(mergeGeometries(coals, false)!, cm));
+    const fm = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+    fm.fog = false;
+    const v = uv();
+    const n = mx_fractal_noise_float(vec3(v.x.mul(3.0).add(positionWorld.x), v.y.mul(2.0).sub(U.time.mul(2.4)), positionWorld.z), 3, 2.0, 0.5).mul(0.5).add(0.5);
+    const shape = sstep(0.5, 0.0, abs(v.x.sub(0.5)).add(v.y.mul(v.y).mul(0.42))).mul(smoothstep(0.0, 0.08, v.y));
+    const f = saturate(shape.mul(n.mul(1.6)).sub(v.y.mul(0.35)));
+    const col = mix(vec3(1.0, 0.25, 0.04), vec3(1.4, 0.9, 0.35), pow(f, 0.6));
+    fm.colorNode = vec4(col.mul(f).mul(2.2).mul(flick), 1);
+    const fl = new THREE.Mesh(mergeGeometries(flames, false)!, fm);
+    fl.renderOrder = 4;
+    this.group.add(fl);
+  }
+
+  /** Tattered crimson banners hanging from standing columns, stirring in the wind. */
+  private buildBanners(standing: { x: number; z: number; h: number; a: number }[], rng: RNG) {
+    const A = ARENA;
+    const geos: THREE.BufferGeometry[] = [];
+    const picks = standing.filter((_, i) => i % 2 === 0).slice(0, 6);
+    for (const c of picks) {
+      const g = new THREE.PlaneGeometry(1.7, 5.6, 3, 18);
+      g.translate(0, -2.8, 0);
+      const uvs = g.attributes.uv as THREE.BufferAttribute;
+      for (let i = 0; i < uvs.count; i++) uvs.setY(i, 1 - uvs.getY(i)); // v: 0 top -> 1 bottom
+      // Face the plaza, hung just inside the column.
+      const inward = Math.atan2(A.x - c.x, A.z - c.z);
+      g.rotateY(inward);
+      const off = 0.95;
+      g.translate(c.x + Math.sin(inward) * off, A.height + c.h - 0.9, c.z + Math.cos(inward) * off);
+      geos.push(g.toNonIndexed());
+      // Iron rod.
+      void rng;
+    }
+    if (!geos.length) return;
+    const m = new THREE.MeshStandardNodeMaterial({ side: THREE.DoubleSide });
+    const v = uv();
+    const along = v.y;
+    const sway = sin(U.time.mul(1.7).add(positionLocal.x.mul(0.3)).add(along.mul(3.0))).mul(0.5).add(sin(U.time.mul(3.1).add(along.mul(6.0))).mul(0.15));
+    const amt = pow(along, 1.4).mul(U.windStrength.mul(0.9).add(0.25));
+    m.positionNode = positionLocal.add(vec3(U.windDir.x.mul(sway.add(0.5)), 0, U.windDir.y.mul(sway.add(0.5))).mul(amt));
+    // Crimson field, gold border and a ringed emblem.
+    const px = v.x.sub(0.5).mul(1.7),
+      py = v.y.sub(0.3).mul(5.6);
+    const r = length(vec3(px, py.mul(0.9), 0));
+    const emblem = sstep(0.03, 0.0, abs(r.sub(0.55))).add(sstep(0.04, 0.0, abs(r.sub(0.32))).mul(0.8)).add(sstep(0.05, 0.0, abs(atan(py, px.add(0.0001)).mul(4.0).sin()).mul(r)).mul(sstep(0.52, 0.3, r)));
+    const border = sstep(0.12, 0.08, v.x).add(sstep(0.88, 0.92, v.x)).add(sstep(0.04, 0.02, v.y));
+    const weave = mx_noise_float(vec3(v.mul(vec3(60, 200, 0).xy), 0)).mul(0.5).add(0.5);
+    const grime = smoothstep(0.4, 1.0, along).mul(0.5);
+    const gold = saturate(border.add(emblem));
+    let col: any = mix(vec3(0.24, 0.02, 0.025), vec3(0.62, 0.45, 0.16), gold).mul(float(0.85).add(weave.mul(0.2))).mul(float(1).sub(grime));
+    m.colorNode = col;
+    m.roughnessNode = mix(float(0.85), float(0.45), gold);
+    m.metalnessNode = gold.mul(0.6);
+    // Tattered, frayed hem.
+    const tear = mx_fractal_noise_float(vec3(v.x.mul(7.0), positionWorld.x.add(positionWorld.z), 0.0), 3, 2.0, 0.5).mul(0.5).add(0.5);
+    m.alphaTest = 0.5;
+    m.opacityNode = sstep(0.0, 0.0001, float(1.0).sub(along).sub(tear.mul(0.28)).sub(0.02));
+    const mesh = new THREE.Mesh(mergeGeometries(geos, false)!, m);
+    mesh.castShadow = true;
+    this.group.add(mesh);
+    this.buildFires();
+  }
+
+  /** A carved rune ring inlaid in the plaza floor that breathes with the glyphs. */
+  private buildFloorRunes() {
+    const A = ARENA;
+    const g = new THREE.RingGeometry(11.5, 16.5, 160, 3);
+    g.rotateX(-Math.PI / 2);
+    g.translate(A.x, A.height + 0.05, A.z);
+    const m = new THREE.MeshStandardNodeMaterial({ transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+    const dx = positionWorld.x.sub(A.x),
+      dz = positionWorld.z.sub(A.z);
+    const r = length(vec3(dx, 0, dz));
+    const a = atan(dz, dx);
+    const ring = (rad: number, w: number) => sstep(w, 0.0, abs(r.sub(rad)));
+    const lines = ring(12.0, 0.12).add(ring(16.0, 0.12)).add(ring(12.6, 0.05)).add(ring(15.4, 0.05));
+    const cellA = a.mul(36.0 / (Math.PI * 2));
+    const cell = fract(cellA);
+    const glyphN = mx_noise_float(vec3(cellA.floor(), r.mul(1.4).floor(), 7.0)).mul(0.5).add(0.5);
+    const glyphs = smoothstep(0.55, 0.7, glyphN).mul(sstep(0.35, 0.3, abs(cell.sub(0.5)))).mul(smoothstep(12.9, 13.2, r)).mul(sstep(15.1, 14.8, r));
+    const ticks = sstep(0.06, 0.0, abs(cell.sub(0.5)).sub(0.44).abs()).mul(ring(14.0, 1.15));
+    const pat = saturate(lines.add(glyphs.mul(0.9)).add(ticks.mul(0.4)));
+    m.colorNode = vec3(0.08, 0.075, 0.07);
+    m.roughnessNode = float(0.95);
+    m.opacityNode = pat.mul(0.7);
+    m.emissiveNode = vec3(0.25, 0.95, 0.75).mul(pat).mul(this.glyphPulse).mul(0.9);
+    const mesh = new THREE.Mesh(g, m);
+    mesh.receiveShadow = true;
+    mesh.renderOrder = 1;
+    this.group.add(mesh);
   }
 
   private buildArch(stone: THREE.BufferGeometry[], glyph: THREE.BufferGeometry[], x: number, y: number, z: number, rot: number, span: number, height: number, rng: RNG) {
